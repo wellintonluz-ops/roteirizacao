@@ -1,0 +1,1225 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Roteirizador SC</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<style>
+/* Layout: cabeçalho com abas; aba Rotas = painel + mapa; abas de cadastro = tabela larga com barra de ações. Identidade de placa de rodovia (verde de sinalização + âmbar de trânsito). */
+:root{
+  --bg:#f3f5f3; --surface:#ffffff; --surface-2:#eaefec; --line:#d3dbd6;
+  --fg:#17211c; --muted:#5c6a63;
+  --accent:#0f6b47; --accent-fg:#ffffff; --accent-soft:#dcefe5;
+  --amber:#b06e00; --amber-soft:#fbefd6; --red:#c0392b; --red-soft:#f8dedb;
+  --font-display:"Barlow Semi Condensed","Arial Narrow",Arial,sans-serif;
+  --font-body:"Barlow",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --font-mono:"JetBrains Mono",ui-monospace,Consolas,monospace;
+  --radius:8px;
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#0f1512; --surface:#161e1a; --surface-2:#1d2722; --line:#2b3832;
+  --fg:#e3ebe6; --muted:#93a39b;
+  --accent:#3fae7e; --accent-fg:#06140d; --accent-soft:#183327;
+  --amber:#f0b440; --amber-soft:#3a2e14; --red:#ff7b6b; --red-soft:#3d1f1b;
+  color-scheme:dark;
+}}
+:root[data-theme="dark"]{
+  --bg:#0f1512; --surface:#161e1a; --surface-2:#1d2722; --line:#2b3832;
+  --fg:#e3ebe6; --muted:#93a39b;
+  --accent:#3fae7e; --accent-fg:#06140d; --accent-soft:#183327;
+  --amber:#f0b440; --amber-soft:#3a2e14; --red:#ff7b6b; --red-soft:#3d1f1b;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--fg);font:15px/1.45 var(--font-body);display:flex;flex-direction:column}
+button,input,select,textarea{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+/* Cabeçalho */
+.top{display:flex;align-items:center;gap:16px;flex-wrap:wrap;padding:10px max(16px,env(safe-area-inset-right,0px)) 0 max(16px,env(safe-area-inset-left,0px));background:var(--accent);color:var(--accent-fg)}
+.brand{display:flex;align-items:center;gap:10px;padding-bottom:10px}
+.shield{display:grid;place-items:center;width:36px;height:36px;border:2px solid currentColor;border-radius:6px;font:700 13px/1 var(--font-display);letter-spacing:.04em}
+.brand h1{margin:0;font:700 21px/1 var(--font-display)}
+.brand small{display:block;font-size:12px;opacity:.85;margin-top:2px}
+.tabs{display:flex;gap:2px;align-self:flex-end;overflow-x:auto;flex:1;min-width:0}
+.tab-btn{border:0;background:transparent;color:inherit;opacity:.8;padding:10px 14px;font:600 15px/1 var(--font-display);letter-spacing:.03em;cursor:pointer;border-radius:6px 6px 0 0;white-space:nowrap}
+.tab-btn:hover{opacity:1}
+.tab-btn[aria-selected="true"]{background:var(--bg);color:var(--fg);opacity:1}
+.tab-btn .count{font:500 12px/1 var(--font-mono);opacity:.7;margin-left:4px}
+.who{display:flex;align-items:center;gap:8px;font-size:13px;padding-bottom:10px}
+.who button{border:1px solid currentColor;background:transparent;color:inherit;border-radius:5px;padding:3px 8px;cursor:pointer;font-size:12.5px}
+.mode{padding:3px 8px;border-radius:4px;background:var(--amber-soft);color:var(--amber);font:700 11px/1.2 var(--font-display);letter-spacing:.06em;text-transform:uppercase}
+
+main{flex:1;min-height:0;display:flex;flex-direction:column}
+.tab{flex:1;min-height:0}
+.page{max-width:1200px;width:100%;margin:0 auto;padding-block:20px 40px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));display:flex;flex-direction:column;gap:14px}
+.page-head{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.page-head h2{margin:0;font:700 26px/1.1 var(--font-display)}
+.page-head p{margin:4px 0 0;color:var(--muted);font-size:14px}
+.toolbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.toolbar input[type=search],.toolbar select{width:auto;min-width:180px;flex:0 1 260px}
+.kpis{display:flex;flex-wrap:wrap;gap:6px 22px;font-size:13.5px;color:var(--muted)}
+.kpis b{color:var(--fg);font:600 15px var(--font-mono)}
+
+.hint{font-size:12.5px;color:var(--muted);margin:0}
+input[type=text],input[type=password],input[type=number],input[type=date],input[type=time],input[type=search],input[type=tel],select,textarea{
+  width:100%;min-width:0;padding:8px 10px;border:1px solid var(--line);border-radius:6px;background:var(--bg);
+}
+label.field{display:flex;flex-direction:column;gap:4px;font-size:12.5px;color:var(--muted);min-width:0}
+.check{display:flex;gap:8px;align-items:flex-start;font-size:13.5px}
+.check input{margin-top:3px;accent-color:var(--accent)}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:8px 12px;border-radius:6px;border:1px solid var(--line);background:var(--surface);cursor:pointer;font-weight:500;font-size:14px;text-decoration:none;color:inherit}
+.btn:hover{background:var(--surface-2)}
+.btn.accent{background:var(--accent);color:var(--accent-fg);border-color:var(--accent);font-weight:600}
+.btn.accent:hover{filter:brightness(1.08)}
+.btn.primary{background:var(--accent);color:var(--accent-fg);border-color:var(--accent);font:700 16px/1 var(--font-display);letter-spacing:.03em;padding:12px 16px;text-transform:uppercase;width:100%}
+.btn:disabled{opacity:.55;cursor:not-allowed}
+.btn.ghost{border-color:transparent;background:transparent;color:var(--muted)}
+.btn.ghost:hover{color:var(--fg);background:var(--surface-2)}
+.btn.small{padding:5px 9px;font-size:13px}
+.btn.danger{color:var(--red)}
+.btn-row{display:flex;flex-wrap:wrap;gap:8px}
+
+/* Tabelas de cadastro */
+.table-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-size:14px}
+th,td{padding:9px 12px;text-align:left;vertical-align:top}
+th{font:600 11.5px/1.2 var(--font-display);text-transform:uppercase;letter-spacing:.07em;color:var(--muted);background:var(--surface-2);white-space:nowrap}
+tbody tr{border-top:1px solid var(--line)}
+tbody tr:hover{background:var(--surface-2)}
+td.num,th.num{text-align:right}
+td.act{white-space:nowrap;text-align:right;width:1%}
+.mono{font-family:var(--font-mono);font-variant-numeric:tabular-nums;font-size:13px}
+.sub{display:block;font-size:12px;color:var(--muted)}
+.inactive td{opacity:.5}
+.chip{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:999px;font-size:12px;font-weight:600;white-space:nowrap}
+.chip.ok{background:var(--accent-soft);color:var(--accent)}
+.chip.warn{background:var(--amber-soft);color:var(--amber)}
+.chip.err{background:var(--red-soft);color:var(--red)}
+.chip.neutral{background:var(--surface-2);color:var(--muted)}
+.icon-btn{width:30px;height:30px;display:inline-grid;place-items:center;border:0;background:transparent;border-radius:5px;color:var(--muted);cursor:pointer;font-size:14px}
+.icon-btn:hover{background:var(--surface);color:var(--fg)}
+.empty{padding:18px;border:1px dashed var(--line);border-radius:var(--radius);font-size:14px;color:var(--muted);background:var(--surface)}
+.notice{padding:12px 14px;border-radius:var(--radius);background:var(--amber-soft);color:var(--fg);font-size:13.5px;border:1px solid color-mix(in srgb,var(--amber) 30%,transparent)}
+.notice b{color:var(--amber)}
+.notice.err{background:var(--red-soft)}
+.notice.err b{color:var(--red)}
+
+/* Configurações */
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:16px;display:flex;flex-direction:column;gap:12px;min-width:0}
+.card h3{margin:0;font:700 17px/1.2 var(--font-display)}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+pre.code{margin:0;padding:10px;background:var(--surface-2);border-radius:6px;font:12px/1.5 var(--font-mono);overflow-x:auto;white-space:pre}
+
+/* Aba Rotas */
+.rot{display:grid;grid-template-columns:minmax(360px,460px) 1fr;min-height:0;height:100%}
+.panel{display:flex;flex-direction:column;min-width:0;border-right:1px solid var(--line);background:var(--surface);overflow-y:auto;padding:4px max(16px,env(safe-area-inset-right,0px)) 24px max(16px,env(safe-area-inset-left,0px))}
+.block{padding:14px 0;border-bottom:1px solid var(--line);display:flex;flex-direction:column;gap:10px}
+.block:last-child{border-bottom:0}
+.block h3{margin:0;font:600 13px/1 var(--font-display);text-transform:uppercase;letter-spacing:.09em;color:var(--muted)}
+.pre-sum{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.stat{padding:8px 10px;background:var(--surface-2);border-radius:6px;min-width:0}
+.stat b{display:block;font:600 20px/1.1 var(--font-mono)}
+.stat span{font-size:11.5px;color:var(--muted)}
+.status{font-size:13px;color:var(--muted);min-height:1.2em}
+.status.err{color:var(--red)}
+.progress{height:3px;background:var(--surface-2);border-radius:2px;overflow:hidden}
+.progress span{display:block;height:100%;width:0;background:var(--accent);transition:width .2s}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.seg button{border:0;background:var(--surface);padding:6px 14px;cursor:pointer;font-weight:600;font-size:13.5px}
+.seg button[aria-pressed="true"]{background:var(--fg);color:var(--bg)}
+.turno-res{display:flex;flex-direction:column;gap:8px}
+.turno-head{display:flex;justify-content:space-between;align-items:baseline;gap:8px;cursor:pointer;padding:6px 0}
+.turno-head h4{margin:0;font:700 17px/1.2 var(--font-display)}
+.turno-head.sel h4{color:var(--accent)}
+.vcard{border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);overflow:hidden}
+.vcard.dim{opacity:.55}
+.vhead{display:grid;grid-template-columns:6px 1fr auto;gap:10px;align-items:center;padding:9px 10px 9px 0;cursor:pointer}
+.vhead .sw{height:100%;align-self:stretch}
+.vhead b{font-weight:600}
+.vhead .meta{font-size:12.5px;color:var(--muted)}
+.vhead .times{text-align:right;font:600 13px var(--font-mono)}
+.vhead .times small{display:block;font-weight:400;color:var(--muted);font-size:11.5px}
+.vbody{padding:0 12px 10px 16px;display:flex;flex-direction:column;gap:6px}
+.itin{list-style:none;margin:0;padding:0}
+.itin li{display:grid;grid-template-columns:24px 1fr auto;gap:8px;padding:6px 0;border-top:1px dashed var(--line);font-size:13.5px;align-items:start}
+.itin li:first-child{border-top:0}
+.itin .n{display:grid;place-items:center;width:22px;height:22px;border-radius:50%;color:#fff;font:700 11.5px/1 var(--font-display);margin-top:1px}
+.itin .n.sq{border-radius:4px;background:var(--fg);color:var(--bg)}
+.itin .who2{min-width:0}
+.itin .who2 span{display:block;font-size:12px;color:var(--muted);overflow-wrap:anywhere}
+.itin .t{font:600 13.5px var(--font-mono);text-align:right}
+.itin .t small{display:block;font-weight:400;font-size:11px;color:var(--muted)}
+.long{color:var(--amber)} .vlong{color:var(--red)}
+.map-wrap{position:relative;min-width:0}
+#map{position:absolute;inset:0;background:var(--surface-2)}
+.map-tools{position:absolute;z-index:500;left:56px;top:12px;display:flex;gap:6px;flex-wrap:wrap}
+.map-tools .btn{box-shadow:0 2px 8px rgb(0 0 0 / .12);font-size:13px;padding:6px 10px}
+.map-tools .btn[aria-pressed="true"]{background:var(--accent);color:var(--accent-fg);border-color:var(--accent)}
+.mk{display:grid;place-items:center;width:24px;height:24px;border-radius:50%;color:#fff;border:2px solid #fff;font:700 11.5px/1 "Barlow Semi Condensed",Arial,sans-serif;box-shadow:0 1px 4px rgb(0 0 0 / .35)}
+.mk.dot{width:12px;height:12px;border-width:2px}
+.mk.home{border-radius:5px;background:#17211c;width:28px;font-size:10px}
+.mk.co{border-radius:6px;background:#0f6b47;width:36px;height:28px;font-size:11px}
+
+/* Diálogo */
+dialog{border:1px solid var(--line);border-radius:12px;padding:0;background:var(--surface);color:var(--fg);width:min(560px,calc(100vw - 32px));max-height:calc(100vh - 40px)}
+dialog::backdrop{background:rgb(10 20 15 / .45)}
+.dlg{display:flex;flex-direction:column;gap:12px;padding:18px}
+.dlg h3{margin:0;font:700 20px/1.2 var(--font-display)}
+.dlg .grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.dlg .grid .full{grid-column:1/-1}
+.checks{display:flex;flex-wrap:wrap;gap:6px 14px}
+.dlg-actions{display:flex;justify-content:flex-end;gap:8px;padding-top:4px}
+
+/* Login */
+.login{position:fixed;inset:0;z-index:2000;display:grid;place-items:center;background:var(--bg);padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.login .card{max-width:380px;text-align:center;align-items:center}
+.toast{position:fixed;z-index:3000;left:50%;bottom:max(20px,env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--fg);color:var(--bg);padding:10px 16px;border-radius:8px;font-size:14px;box-shadow:0 6px 20px rgb(0 0 0 / .25);max-width:calc(100vw - 32px)}
+
+@media (max-width:860px){
+  .rot{grid-template-columns:1fr;height:auto}
+  .map-wrap{height:55vh;order:-1;position:sticky;top:env(safe-area-inset-top,0px);z-index:5}
+  .panel{overflow:visible;border-right:0}
+  .brand small{display:none}
+  .dlg .grid,.row2{grid-template-columns:1fr}
+  th.hide-sm,td.hide-sm{display:none}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="brand"><div class="shield" aria-hidden="true">SC</div><div><h1>Roteirizador SC</h1><small>Transporte de funcionários por turno</small></div></div>
+  <nav class="tabs" role="tablist">
+    <button class="tab-btn" role="tab" data-tab="rotas" aria-selected="true">Rotas</button>
+    <button class="tab-btn" role="tab" data-tab="func" aria-selected="false">Funcionários<span class="count" id="cFunc"></span></button>
+    <button class="tab-btn" role="tab" data-tab="veic" aria-selected="false">Veículos<span class="count" id="cVeic"></span></button>
+    <button class="tab-btn" role="tab" data-tab="turnos" aria-selected="false">Turnos<span class="count" id="cTurno"></span></button>
+    <button class="tab-btn" role="tab" data-tab="config" aria-selected="false">Configurações</button>
+  </nav>
+  <div class="who" id="who"></div>
+</header>
+
+<main>
+  <!-- ROTAS -->
+  <section class="tab rot" id="tab-rotas">
+    <aside class="panel">
+      <div class="block">
+        <h3>Planejamento</h3>
+        <div class="row2">
+          <label class="field">Turno
+            <select id="rTurno"></select>
+          </label>
+          <label class="field">Data
+            <input type="date" id="rDate">
+          </label>
+        </div>
+        <div class="pre-sum" id="preSum"></div>
+        <div id="preWarn"></div>
+        <label class="check"><input type="checkbox" id="rFewer" checked> <span>Usar o menor número de carros possível<br><span class="hint">Desmarcado, usa todos os carros com motorista disponível e reduz o tempo a bordo.</span></span></label>
+        <button class="btn primary" id="runBtn" type="button">Montar rotas</button>
+        <div class="progress" aria-hidden="true"><span id="bar"></span></div>
+        <div class="status" id="status" role="status"></div>
+      </div>
+      <div class="block" id="resBlock">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+          <h3>Resultado</h3>
+          <div class="seg" role="group" aria-label="Trajeto">
+            <button type="button" id="vIda" aria-pressed="true">Ida</button>
+            <button type="button" id="vVolta" aria-pressed="false">Volta</button>
+          </div>
+        </div>
+        <div id="results"><div class="empty">Escolha o turno e a data e clique em <b>Montar rotas</b>. Os funcionários são divididos entre os carros disponíveis, respeitando a capacidade, e cada rota sai da casa do motorista.</div></div>
+        <div class="btn-row" id="resActions" hidden>
+          <button class="btn small" id="exportPlan" type="button">Exportar Excel</button>
+        </div>
+      </div>
+    </aside>
+    <div class="map-wrap">
+      <div id="map" role="application" aria-label="Mapa de Santa Catarina"></div>
+      <div class="map-tools">
+        <button class="btn" id="trafficBtn" type="button" aria-pressed="false">Trânsito agora</button>
+        <button class="btn" id="showAllBtn" type="button" hidden>Mostrar todas as rotas</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- FUNCIONÁRIOS -->
+  <section class="tab" id="tab-func" hidden>
+    <div class="page">
+      <div class="page-head">
+        <div><h2>Funcionários</h2><p>Quem usa o transporte, onde embarca, em qual turno trabalha e quem pode dirigir.</p></div>
+        <div class="btn-row">
+          <button class="btn" id="fTemplate" type="button">Baixar modelo Excel</button>
+          <label class="btn" for="fImport">Importar Excel</label>
+          <input type="file" id="fImport" accept=".xlsx,.xls,.csv" hidden>
+          <button class="btn accent" id="fNew" type="button">+ Novo funcionário</button>
+        </div>
+      </div>
+      <div class="toolbar">
+        <input type="search" id="fSearch" placeholder="Buscar por nome ou endereço" aria-label="Buscar funcionários">
+        <select id="fFilter" aria-label="Filtrar por turno"></select>
+        <button class="btn small" id="fGeocode" type="button">Localizar endereços pendentes</button>
+        <span class="kpis" id="fKpis"></span>
+      </div>
+      <div id="fTable"></div>
+    </div>
+  </section>
+
+  <!-- VEÍCULOS -->
+  <section class="tab" id="tab-veic" hidden>
+    <div class="page">
+      <div class="page-head">
+        <div><h2>Veículos</h2><p>Frota disponível e lugares de cada carro, contando o motorista. O motorista é um funcionário do turno com CNH.</p></div>
+        <div class="btn-row">
+          <button class="btn" id="vTemplate" type="button">Baixar modelo Excel</button>
+          <label class="btn" for="vImport">Importar Excel</label>
+          <input type="file" id="vImport" accept=".xlsx,.xls,.csv" hidden>
+          <button class="btn accent" id="vNew" type="button">+ Novo veículo</button>
+        </div>
+      </div>
+      <div class="kpis" id="vKpis"></div>
+      <div id="vTable"></div>
+    </div>
+  </section>
+
+  <!-- TURNOS -->
+  <section class="tab" id="tab-turnos" hidden>
+    <div class="page">
+      <div class="page-head">
+        <div><h2>Turnos</h2><p>Horários de entrada e saída. A ida é planejada para chegar à empresa com a antecedência definida.</p></div>
+        <button class="btn accent" id="tNew" type="button">+ Novo turno</button>
+      </div>
+      <div id="tTable"></div>
+    </div>
+  </section>
+
+  <!-- CONFIG -->
+  <section class="tab" id="tab-config" hidden>
+    <div class="page">
+      <div class="page-head"><div><h2>Configurações</h2><p>Valem para toda a equipe.</p></div></div>
+      <div id="modeNotice"></div>
+      <div class="cards">
+        <div class="card">
+          <h3>Empresa (destino da ida)</h3>
+          <label class="field">Nome<input type="text" id="cNome"></label>
+          <label class="field">Endereço ou coordenadas<input type="text" id="cEnd"></label>
+          <span class="hint" id="cGeo"></span>
+        </div>
+        <div class="card">
+          <h3>Tempos operacionais</h3>
+          <div class="row2">
+            <label class="field">Embarque/desembarque por parada (min)<input type="number" id="cDwell" min="0" max="30" step="1"></label>
+            <label class="field">Saída da empresa após o fim do turno (min)<input type="number" id="cAfter" min="0" max="120" step="5"></label>
+          </div>
+          <label class="check"><input type="checkbox" id="cRegion"> <span>Buscar endereços só em SC e na divisa com o PR</span></label>
+        </div>
+        <div class="card">
+          <h3>API de rotas (TomTom)</h3>
+          <label class="field">Chave da API<input type="password" id="cKey" autocomplete="off" placeholder="Cole a chave aqui"></label>
+          <p class="hint">Crie grátis em developer.tomtom.com (2.500 consultas/dia). Fica salva para toda a equipe. Restrinja a chave ao domínio do site no painel da TomTom.</p>
+        </div>
+      </div>
+      <div class="btn-row"><button class="btn accent" id="cSave" type="button">Salvar configurações</button></div>
+    </div>
+  </section>
+</main>
+
+<dialog id="dlg"><form class="dlg" id="dlgForm" method="dialog"></form></dialog>
+<div class="login" id="login" hidden>
+  <div class="card">
+    <div class="shield" style="color:var(--accent)">SC</div>
+    <h3>Roteirizador SC</h3>
+    <p class="hint" id="loginMsg">Entre com sua conta Google @grupotbx.com.br.</p>
+    <button class="btn accent" id="loginBtn" type="button">Entrar com Google</button>
+  </div>
+</div>
+<div class="toast" id="toast" hidden></div>
+
+<script>
+/* ======================================================================
+   CONFIGURAÇÃO DO FIREBASE — cole aqui o firebaseConfig do seu projeto.
+   Enquanto apiKey começar com "COLE", o sistema roda em MODO LOCAL
+   (dados só neste navegador, com exemplos para testar).
+   ====================================================================== */
+const FIREBASE_CONFIG = {
+  apiKey: "AIzaSyCc2c19LRKXnkVykEeqR5-jTGLlqSld1BI",
+  authDomain: "roteirizacao-dda5b.firebaseapp.com",
+  projectId: "roteirizacao-dda5b",
+  storageBucket: "roteirizacao-dda5b.firebasestorage.app",
+  messagingSenderId: "1044916837234",
+  appId: "1:1044916837234:web:3bf410d38cf3dd01ba1beb",
+  measurementId: "G-PYTY6HL0SY"
+};
+const ALLOWED_DOMAIN = 'grupotbx.com.br';
+</script>
+
+<script>
+(() => {
+'use strict';
+const $ = s => document.querySelector(s);
+const TZ = 'America/Sao_Paulo';
+const REGION = {topLeft:'-25.30,-54.00', btmRight:'-29.50,-48.20'};
+const COL = {func:'rot_funcionarios', veic:'rot_veiculos', turno:'rot_turnos', config:'rot_config'};
+const ROUTE_COLORS = ['#1f77b4','#d62728','#2ca02c','#9467bd','#ff7f0e','#17becf','#8c564b','#e377c2','#bcbd22','#393b79','#637939','#843c39'];
+const useFirebase = !!(FIREBASE_CONFIG.apiKey && !FIREBASE_CONFIG.apiKey.startsWith('COLE'));
+
+const data = {func:[], veic:[], turno:[], config:{}};
+const DEFAULT_CONFIG = {nome:'Grupo TBX', endereco:'Garuva, SC', geo:null, dwell:2, after:10, region:true, tomtomKey:''};
+let user = null;
+
+/* ---------------- Utilidades ---------------- */
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const uid = () => Math.random().toString(36).slice(2,10) + Date.now().toString(36).slice(-4);
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const fmtTime = d => new Intl.DateTimeFormat('pt-BR',{timeZone:TZ,hour:'2-digit',minute:'2-digit'}).format(d);
+const fmtDate = d => new Intl.DateTimeFormat('pt-BR',{timeZone:TZ,weekday:'short',day:'2-digit',month:'2-digit'}).format(d);
+const fmtDur = sec => { const m = Math.round(sec/60), h = Math.floor(m/60), r = m%60; return h ? `${h}h${String(r).padStart(2,'0')}` : `${r} min`; };
+const fmtKm = m => (m/1000).toLocaleString('pt-BR',{maximumFractionDigits:m<100000?1:0}) + ' km';
+const ymd = d => new Intl.DateTimeFormat('en-CA',{timeZone:TZ,year:'numeric',month:'2-digit',day:'2-digit'}).format(d);
+const addDays = (dateStr, n) => { const d = new Date(`${dateStr}T12:00:00-03:00`); d.setUTCDate(d.getUTCDate()+n); return ymd(d); };
+const at = (dateStr, hhmm) => new Date(`${dateStr}T${hhmm}:00-03:00`);
+function toast(msg, ms=2600){ const t = $('#toast'); t.textContent = msg; t.hidden = false; clearTimeout(toast._t); toast._t = setTimeout(()=>{ t.hidden = true; }, ms); }
+function cfg(){ return Object.assign({}, DEFAULT_CONFIG, data.config); }
+function turnoById(id){ return data.turno.find(t => t.id === id); }
+function parseCoords(t){
+  const m = String(t||'').trim().match(/^(-?\d{1,2}(?:\.\d+)?)\s*[,;]\s*(-?\d{1,3}(?:\.\d+)?)$/);
+  if (!m) return null; const lat = +m[1], lon = +m[2];
+  if (Math.abs(lat) > 90 || Math.abs(lon) > 180) return null;
+  return {lat, lon, label:`${lat.toFixed(5)}, ${lon.toFixed(5)}`};
+}
+function km(a, b){ // distância em linha reta × fator de estrada, em km
+  const R = 6371, r = Math.PI/180, dLa = (b.lat-a.lat)*r, dLo = (b.lon-a.lon)*r;
+  const s = Math.sin(dLa/2)**2 + Math.cos(a.lat*r)*Math.cos(b.lat*r)*Math.sin(dLo/2)**2;
+  return 2*R*Math.asin(Math.sqrt(s)) * 1.35;
+}
+
+/* ---------------- Camada de dados ---------------- */
+const LOCAL_KEY = 'rotSC.frota.v1';
+function exampleData(){
+  const t1 = 't-ex1', t2 = 't-ex2', t3 = 't-ex3';
+  const g = (lat, lon, label) => ({lat, lon, label: label + ' (exemplo)'});
+  const f = (nome, endereco, turnoId, geo, cnh) => ({id:uid(), nome, endereco, turnoId, telefone:'', cnh: cnh||'nao', ativo:true, geo, exemplo:true});
+  return {
+    turno:[
+      {id:t1, nome:'1º turno', entrada:'06:00', saida:'14:20', antecedencia:10, exemplo:true},
+      {id:t2, nome:'2º turno', entrada:'14:20', saida:'22:40', antecedencia:10, exemplo:true},
+      {id:t3, nome:'Administrativo', entrada:'07:30', saida:'17:18', antecedencia:10, exemplo:true}
+    ],
+    func:[
+      f('Ana Paula (exemplo)','Rua Quinze de Novembro, Joinville - SC',t1,g(-26.3010,-48.8460,'Centro, Joinville'),'pode'),
+      f('Bruno Lima (exemplo)','Rua Dona Francisca, Pirabeiraba, Joinville - SC',t1,g(-26.2050,-48.9020,'Pirabeiraba, Joinville')),
+      f('Carla Souza (exemplo)','Rua Tuiuti, Aventureiro, Joinville - SC',t1,g(-26.2560,-48.8100,'Aventureiro, Joinville')),
+      f('Diego Rocha (exemplo)','Av. Celso Ramos, Itapoá - SC',t1,g(-26.1170,-48.6160,'Itapoá'),'pode'),
+      f('Eduarda Melo (exemplo)','Rua Barão do Rio Branco, São Francisco do Sul - SC',t1,g(-26.2430,-48.6380,'São Francisco do Sul'),'pode'),
+      f('Fábio Costa (exemplo)','Rua Celso Ramos, Garuva - SC',t1,g(-26.0290,-48.8540,'Centro, Garuva'),'pode'),
+      f('Gabriela Nunes (exemplo)','Rua Tuiuti, Comasa, Joinville - SC',t1,g(-26.2920,-48.8000,'Comasa, Joinville')),
+      f('Henrique Alves (exemplo)','Rua XV de Novembro, Vila Nova, Joinville - SC',t1,g(-26.2800,-48.9150,'Vila Nova, Joinville'),'pode'),
+      f('Isabela Ramos (exemplo)','Rua Coronel Matias, Araquari - SC',t1,g(-26.3700,-48.7220,'Araquari')),
+      f('João Pedro (exemplo)','Av. Damião Botelho de Souza, Guaratuba - PR',t1,g(-25.8830,-48.5750,'Guaratuba - PR')),
+      f('Karina Dias (exemplo)','Rua Itapocu, Itapoá - SC',t1,g(-26.0700,-48.6150,'Itapoá norte')),
+      f('Lucas Pereira (exemplo)','Rua Ottokar Doerffel, Joinville - SC',t1,g(-26.2950,-48.8700,'Atiradores, Joinville')),
+      f('Marina Teixeira (exemplo)','Rua Iririú, Joinville - SC',t2,g(-26.2850,-48.8250,'Iririú, Joinville'),'pode'),
+      f('Nelson Duarte (exemplo)','Rua Principal, Garuva - SC',t2,g(-26.0350,-48.8600,'Garuva')),
+      f('Olívia Prado (exemplo)','Av. Brasil, Itapoá - SC',t2,g(-26.1300,-48.6200,'Itapoá sul'),'pode'),
+      f('Paulo Henrique (exemplo)','Rua Jaguaruna, Joinville - SC',t3,g(-26.3200,-48.8500,'Bucarein, Joinville'),'fixo')
+    ],
+    veic:[
+      {id:uid(), nome:'Spin 01', placa:'ABC1D23', capacidade:7, turnos:[], ativo:true, exemplo:true},
+      {id:uid(), nome:'Spin 02', placa:'DEF4G56', capacidade:7, turnos:[], ativo:true, exemplo:true},
+      {id:uid(), nome:'Gol 03', placa:'GHI7J89', capacidade:5, turnos:[], ativo:true, exemplo:true}
+    ],
+    config:{...DEFAULT_CONFIG, geo:{lat:-26.0263, lon:-48.8552, label:'Garuva, SC (exemplo)'}}
+  };
+}
+const Local = {
+  init(){
+    let d = null; try{ d = JSON.parse(localStorage.getItem(LOCAL_KEY)); }catch{}
+    if (!d) d = exampleData();
+    Object.assign(data, {func:d.func||[], veic:d.veic||[], turno:d.turno||[], config:d.config||{}});
+    this.persist(); renderAll();
+  },
+  persist(){ try{ localStorage.setItem(LOCAL_KEY, JSON.stringify(data)); }catch{} },
+  async save(kind, obj){ if (!obj.id) obj.id = uid(); const arr = data[kind]; const i = arr.findIndex(x=>x.id===obj.id); if (i>=0) arr[i] = obj; else arr.push(obj); this.persist(); renderAll(); },
+  async saveMany(kind, list){ list.forEach(o => { if (!o.id) o.id = uid(); const i = data[kind].findIndex(x=>x.id===o.id); if (i>=0) data[kind][i]=o; else data[kind].push(o); }); this.persist(); renderAll(); },
+  async remove(kind, id){ data[kind] = data[kind].filter(x => x.id !== id); this.persist(); renderAll(); },
+  async setConfig(patch){ data.config = Object.assign({}, data.config, patch); this.persist(); renderAll(); }
+};
+const Fire = {
+  db:null,
+  init(){
+    firebase.initializeApp(FIREBASE_CONFIG);
+    const auth = firebase.auth();
+    $('#loginBtn').addEventListener('click', async () => {
+      const p = new firebase.auth.GoogleAuthProvider(); p.setCustomParameters({hd:ALLOWED_DOMAIN, prompt:'select_account'});
+      try{ await auth.signInWithPopup(p); }catch(e){ $('#loginMsg').textContent = 'Não foi possível entrar: ' + (e.message||e); }
+    });
+    auth.onAuthStateChanged(async u => {
+      if (u && !String(u.email||'').toLowerCase().endsWith('@'+ALLOWED_DOMAIN)){
+        await auth.signOut(); $('#loginMsg').textContent = `A conta ${u.email} não é @${ALLOWED_DOMAIN}. Entre com o e-mail corporativo.`; $('#login').hidden = false; return;
+      }
+      user = u; $('#login').hidden = !!u; renderWho();
+      if (u && !this.db) this.subscribe();
+    });
+  },
+  subscribe(){
+    this.db = firebase.firestore();
+    const map = {func:COL.func, veic:COL.veic, turno:COL.turno};
+    Object.entries(map).forEach(([kind, col]) => {
+      this.db.collection(col).onSnapshot(snap => {
+        data[kind] = snap.docs.map(d => ({id:d.id, ...d.data()}));
+        renderAll();
+      }, err => toast('Erro ao ler ' + col + ': ' + err.message, 6000));
+    });
+    this.db.collection(COL.config).doc('app').onSnapshot(d => { data.config = d.exists ? d.data() : {}; renderAll(); });
+  },
+  clean(obj){ const o = {...obj}; delete o.id; o.atualizadoEm = firebase.firestore.FieldValue.serverTimestamp(); o.atualizadoPor = user?.email || ''; return o; },
+  async save(kind, obj){
+    const col = this.db.collection(COL[kind]);
+    if (obj.id) await col.doc(obj.id).set(this.clean(obj), {merge:true});
+    else await col.add(this.clean(obj));
+  },
+  async saveMany(kind, list){
+    const col = this.db.collection(COL[kind]);
+    for (let i = 0; i < list.length; i += 400){
+      const b = this.db.batch();
+      list.slice(i, i+400).forEach(o => b.set(o.id ? col.doc(o.id) : col.doc(), this.clean(o), {merge:true}));
+      await b.commit();
+    }
+  },
+  async remove(kind, id){ await this.db.collection(COL[kind]).doc(id).delete(); },
+  async setConfig(patch){ await this.db.collection(COL.config).doc('app').set(this.clean(patch), {merge:true}); }
+};
+const Store = useFirebase ? Fire : Local;
+
+function renderWho(){
+  const w = $('#who');
+  if (!useFirebase){ w.innerHTML = '<span class="mode" title="Firebase não configurado: dados só neste navegador">Modo local</span>'; return; }
+  w.innerHTML = user ? `<span>${esc(user.email)}</span><button type="button" id="logout">Sair</button>` : '';
+  $('#logout')?.addEventListener('click', () => firebase.auth().signOut());
+}
+
+/* ---------------- TomTom ---------------- */
+async function api(url){
+  for (let attempt = 0; attempt < 4; attempt++){
+    const res = await fetch(url);
+    if (res.status === 429 || res.status === 503){ await sleep(900*(attempt+1)); continue; }
+    let body = null; try{ body = await res.json(); }catch{}
+    if (res.status === 403) throw new Error('A chave da TomTom foi recusada (403). Confira a chave em Configurações e as restrições de domínio no painel da TomTom.');
+    if (!res.ok){
+      const msg = body?.detailedError?.message || body?.error?.description || body?.errorText || `HTTP ${res.status}`;
+      throw new Error(typeof msg === 'string' ? msg : JSON.stringify(msg));
+    }
+    return body;
+  }
+  throw new Error('Limite de consultas por segundo da TomTom atingido. Aguarde alguns segundos e tente de novo.');
+}
+async function geocode(text){
+  const c = parseCoords(text); if (c) return c;
+  const key = cfg().tomtomKey; if (!key) throw new Error('Configure a chave da TomTom em Configurações.');
+  let url = `https://api.tomtom.com/search/2/geocode/${encodeURIComponent(text)}.json?key=${encodeURIComponent(key)}&limit=1&countrySet=BR&language=pt-BR`;
+  if (cfg().region) url += `&topLeft=${REGION.topLeft}&btmRight=${REGION.btmRight}`;
+  const j = await api(url); await sleep(220);
+  const r = j.results && j.results[0];
+  if (!r) return null;
+  return {lat:r.position.lat, lon:r.position.lon, label:r.address?.freeformAddress || text, score: r.matchConfidence?.score ?? null, tipo: r.type || ''};
+}
+async function routeTT(points, departDate){
+  const key = cfg().tomtomKey;
+  const locs = points.map(p => `${p.lat.toFixed(6)},${p.lon.toFixed(6)}`).join(':');
+  const p = new URLSearchParams({key, traffic:'true', routeType:'fastest', travelMode:'car', computeTravelTimeFor:'all', departAt: isoAt(departDate), language:'pt-BR'});
+  const j = await api(`https://api.tomtom.com/routing/1/calculateRoute/${locs}/json?${p}`);
+  await sleep(220);
+  const r = j.routes && j.routes[0]; if (!r) throw new Error('A TomTom não encontrou rota entre esses pontos.');
+  const line = []; r.legs.forEach(l => l.points.forEach(pt => line.push([pt.latitude, pt.longitude])));
+  return {legs: r.legs.map(l => l.summary), line, travel: r.summary.travelTimeInSeconds, meters: r.summary.lengthInMeters,
+          free: r.summary.noTrafficTravelTimeInSeconds ?? r.summary.travelTimeInSeconds};
+}
+function isoAt(date){
+  return new Intl.DateTimeFormat('sv-SE',{timeZone:TZ,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'}).format(date).replace(' ','T') + '-03:00';
+}
+
+/* ---------------- Abas ---------------- */
+let currentTab = 'rotas';
+document.querySelectorAll('.tab-btn').forEach(b => b.addEventListener('click', () => showTab(b.dataset.tab)));
+function showTab(name){
+  currentTab = name;
+  document.querySelectorAll('.tab-btn').forEach(b => b.setAttribute('aria-selected', String(b.dataset.tab === name)));
+  ['rotas','func','veic','turnos','config'].forEach(t => { $('#tab-'+t).hidden = t !== name; });
+  if (name === 'rotas') setTimeout(() => { map.invalidateSize(); drawMap(); }, 30);
+}
+
+/* ---------------- Render geral ---------------- */
+function renderAll(){
+  $('#cFunc').textContent = data.func.length || '';
+  $('#cVeic').textContent = data.veic.length || '';
+  $('#cTurno').textContent = data.turno.length || '';
+  renderTurnoSelects(); renderFunc(); renderVeic(); renderTurnos(); renderConfig(); renderPre();
+  if (currentTab === 'rotas' && !plan) drawMap();
+}
+function turnoOptions(sel, withAll, allLabel){
+  const ts = data.turno.slice().sort((a,b)=> (a.entrada||'').localeCompare(b.entrada||''));
+  return (withAll ? `<option value="">${allLabel}</option>` : '') + ts.map(t => `<option value="${t.id}" ${t.id===sel?'selected':''}>${esc(t.nome)} (${t.entrada}–${t.saida})</option>`).join('');
+}
+function renderTurnoSelects(){
+  const r = $('#rTurno'), v = r.value;
+  r.innerHTML = turnoOptions(v, true, 'Todos os turnos');
+  if (v && data.turno.some(t=>t.id===v)) r.value = v;
+  const f = $('#fFilter'), fv = f.value;
+  f.innerHTML = turnoOptions(fv, true, 'Todos os turnos') + '<option value="__none">Sem turno</option>';
+  f.value = fv;
+}
+
+/* ---------------- Funcionários ---------------- */
+function geoChip(o, addrKey){
+  if (!o[addrKey]) return '<span class="chip neutral">Sem endereço</span>';
+  if (!o.geo) return '<span class="chip err">Não localizado</span>';
+  if (o.geo.score != null && o.geo.score < 0.7) return '<span class="chip warn" title="A busca encontrou um local aproximado. Confira o endereço.">Aproximado</span>';
+  if (o.geo.tipo && /Geography/i.test(o.geo.tipo)) return '<span class="chip warn" title="Localizado só pela cidade ou bairro. Inclua rua e número.">Só cidade/bairro</span>';
+  return '<span class="chip ok">Localizado</span>';
+}
+function cnhChip(f){
+  if (f.cnh === 'fixo'){ const v = data.veic.find(x=>x.id===f.veiculoFixo); return `<span class="chip ok">Motorista fixo</span>${v?`<span class="sub">${esc(v.nome)}</span>`:''}`; }
+  if (f.cnh === 'pode') return '<span class="chip neutral">Tem CNH</span>';
+  return '<span class="sub">—</span>';
+}
+function renderFunc(){
+  const q = $('#fSearch').value.trim().toLowerCase(), ft = $('#fFilter').value;
+  let list = data.func.slice().sort((a,b)=>(a.nome||'').localeCompare(b.nome||'','pt-BR'));
+  if (q) list = list.filter(f => (f.nome+' '+f.endereco).toLowerCase().includes(q));
+  if (ft === '__none') list = list.filter(f => !turnoById(f.turnoId)); else if (ft) list = list.filter(f => f.turnoId === ft);
+  const pend = data.func.filter(f => f.endereco && !f.geo).length;
+  $('#fKpis').innerHTML = `<span><b>${data.func.filter(f=>f.ativo!==false).length}</b> ativos</span><span><b>${data.func.filter(f=>f.ativo!==false&&(f.cnh==='pode'||f.cnh==='fixo')).length}</b> podem dirigir</span>` + (pend ? `<span><b>${pend}</b> sem localização</span>` : '');
+  if (!data.func.length){ $('#fTable').innerHTML = '<div class="empty">Nenhum funcionário cadastrado. Clique em <b>+ Novo funcionário</b> ou importe uma planilha (baixe o modelo para ver as colunas).</div>'; return; }
+  $('#fTable').innerHTML = `<div class="table-wrap"><table>
+    <thead><tr><th>Nome</th><th>Turno</th><th>Direção</th><th>Endereço de embarque</th><th>Local</th><th class="hide-sm">Telefone</th><th></th></tr></thead>
+    <tbody>${list.map(f => { const t = turnoById(f.turnoId); return `<tr class="${f.ativo===false?'inactive':''}">
+      <td><b>${esc(f.nome)}</b>${f.ativo===false?'<span class="sub">Inativo</span>':''}</td>
+      <td>${t ? esc(t.nome) : '<span class="chip warn">Sem turno</span>'}</td>
+      <td>${cnhChip(f)}</td>
+      <td>${esc(f.endereco)}${f.geo?`<span class="sub">${esc(f.geo.label)}</span>`:''}</td>
+      <td>${geoChip(f,'endereco')}</td>
+      <td class="hide-sm mono">${esc(f.telefone||'')}</td>
+      <td class="act"><button class="icon-btn" data-edit="${f.id}" aria-label="Editar ${esc(f.nome)}">✎</button><button class="icon-btn" data-del="${f.id}" aria-label="Excluir ${esc(f.nome)}">✕</button></td>
+    </tr>`; }).join('')}</tbody></table></div>`;
+  $('#fTable').querySelectorAll('[data-edit]').forEach(b => b.addEventListener('click', () => openForm('func', data.func.find(x=>x.id===b.dataset.edit))));
+  $('#fTable').querySelectorAll('[data-del]').forEach(b => b.addEventListener('click', () => del('func', b.dataset.del)));
+}
+$('#fSearch').addEventListener('input', renderFunc);
+$('#fFilter').addEventListener('change', renderFunc);
+$('#fNew').addEventListener('click', () => openForm('func', null));
+$('#fGeocode').addEventListener('click', async () => {
+  const pend = data.func.filter(f => f.endereco && !f.geo);
+  if (!pend.length){ toast('Todos os endereços já estão localizados.'); return; }
+  if (!cfg().tomtomKey){ toast('Configure a chave da TomTom em Configurações.'); return; }
+  const btn = $('#fGeocode'); btn.disabled = true; let ok = 0, fail = 0;
+  const outF = [], outV = [];
+  for (const [i, o] of pend.entries()){
+    btn.textContent = `Localizando ${i+1}/${pend.length}…`;
+    try{ const g = await geocode(o.endereco); if (g){ ok++; const c = {...o, geo:g}; delete c._veic; (o._veic ? outV : outF).push(c); } else fail++; }
+    catch(e){ toast(e.message, 5000); break; }
+  }
+  if (outF.length) await Store.saveMany('func', outF);
+  if (outV.length) await Store.saveMany('veic', outV);
+  btn.disabled = false; btn.textContent = 'Localizar endereços pendentes';
+  toast(`${ok} localizado${ok===1?'':'s'}` + (fail ? `, ${fail} não encontrado${fail===1?'':'s'} (revise o endereço)` : '.'), 4500);
+});
+
+/* Importação Excel */
+$('#fTemplate').addEventListener('click', () => {
+  const ws = XLSX.utils.aoa_to_sheet([['Nome','Endereço','Turno','Telefone','CNH'],['Maria da Silva','Rua das Palmeiras, 120, Centro, Garuva - SC',data.turno[0]?.nome||'1º turno','(47) 99999-0000','Sim'],['João Souza','Rua Blumenau, 45, Centro, Joinville - SC',data.turno[0]?.nome||'1º turno','','Não'],['Pedro Alves','Rua XV de Novembro, 900, Joinville - SC',data.turno[0]?.nome||'1º turno','','Fixo']]);
+  ws['!cols'] = [{wch:28},{wch:52},{wch:18},{wch:18},{wch:8}];
+  const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Funcionários'); XLSX.writeFile(wb, 'modelo-funcionarios.xlsx');
+});
+$('#fImport').addEventListener('change', async e => {
+  const file = e.target.files[0]; e.target.value = ''; if (!file) return;
+  try{
+    const wb = XLSX.read(await file.arrayBuffer());
+    const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], {defval:''});
+    const norm = s => String(s).normalize('NFD').replace(/[̀-ͯ]/g,'').toLowerCase().trim();
+    const pick = (r, names) => { const k = Object.keys(r).find(k => names.includes(norm(k))); return k ? String(r[k]).trim() : ''; };
+    const existing = new Set(data.func.map(f => norm(f.nome)+'|'+norm(f.endereco)));
+    let semTurno = 0, dup = 0; const list = [];
+    rows.forEach(r => {
+      const nome = pick(r, ['nome','funcionario','colaborador']), endereco = pick(r, ['endereco','endereço','endereco de embarque']);
+      if (!nome) return;
+      if (existing.has(norm(nome)+'|'+norm(endereco))){ dup++; return; }
+      const tn = norm(pick(r, ['turno']));
+      const t = data.turno.find(t => norm(t.nome) === tn);
+      if (!t) semTurno++;
+      const cv = norm(pick(r, ['cnh','motorista','dirige','habilitado']));
+      const cnh = cv.startsWith('fix') ? 'fixo' : (['sim','s','x','yes','pode','1','true'].includes(cv) ? 'pode' : 'nao');
+      list.push({nome, endereco, turnoId: t ? t.id : '', telefone: pick(r, ['telefone','celular','fone']), cnh, ativo:true, geo: parseCoords(endereco)});
+    });
+    if (!list.length){ toast(dup ? 'Todos os funcionários da planilha já estão cadastrados.' : 'Nenhuma linha com a coluna "Nome" foi encontrada.', 5000); return; }
+    await Store.saveMany('func', list);
+    toast(`${list.length} funcionário${list.length>1?'s':''} importado${list.length>1?'s':''}` + (dup?`, ${dup} repetido${dup>1?'s':''} ignorado${dup>1?'s':''}`:'') + (semTurno?`, ${semTurno} sem turno reconhecido`:'') + '. Clique em "Localizar endereços pendentes".', 7000);
+  }catch(err){ toast('Não foi possível ler a planilha: ' + err.message, 6000); }
+});
+
+/* ---------------- Veículos ---------------- */
+function renderVeic(){
+  const ativos = data.veic.filter(v => v.ativo !== false);
+  const cap = ativos.reduce((a,v)=>a+(+v.capacidade||0),0);
+  $('#vKpis').innerHTML = `<span><b>${ativos.length}</b> veículos ativos</span><span><b>${cap}</b> lugares no total (com motoristas)</span>`;
+  if (!data.veic.length){ $('#vTable').innerHTML = '<div class="empty">Nenhum veículo cadastrado. Clique em <b>+ Novo veículo</b>.</div>'; return; }
+  const list = data.veic.slice().sort((a,b)=>(a.nome||'').localeCompare(b.nome||'','pt-BR'));
+  $('#vTable').innerHTML = `<div class="table-wrap"><table>
+    <thead><tr><th>Veículo</th><th>Placa</th><th class="num">Lugares</th><th>Turnos</th><th>Motorista fixo</th><th></th></tr></thead>
+    <tbody>${list.map(v => { const fixos = data.func.filter(f => f.cnh==='fixo' && f.veiculoFixo===v.id); return `<tr class="${v.ativo===false?'inactive':''}">
+      <td><b>${esc(v.nome)}</b>${v.ativo===false?'<span class="sub">Inativo</span>':''}</td>
+      <td class="mono">${esc(v.placa||'')}</td>
+      <td class="num mono">${+v.capacidade||0}<span class="sub">${Math.max(0,(+v.capacidade||0)-1)} + motorista</span></td>
+      <td>${(v.turnos&&v.turnos.length) ? v.turnos.map(id => esc(turnoById(id)?.nome || '?')).join(', ') : '<span class="sub">Todos</span>'}</td>
+      <td>${fixos.length ? fixos.map(f => `${esc(f.nome)}<span class="sub">${esc(turnoById(f.turnoId)?.nome||'')}</span>`).join('') : '<span class="sub">Escolhido pela rota</span>'}</td>
+      <td class="act"><button class="icon-btn" data-edit="${v.id}" aria-label="Editar ${esc(v.nome)}">✎</button><button class="icon-btn" data-del="${v.id}" aria-label="Excluir ${esc(v.nome)}">✕</button></td>
+    </tr>`; }).join('')}</tbody></table></div>`;
+  $('#vTable').querySelectorAll('[data-edit]').forEach(b => b.addEventListener('click', () => openForm('veic', data.veic.find(x=>x.id===b.dataset.edit))));
+  $('#vTable').querySelectorAll('[data-del]').forEach(b => b.addEventListener('click', () => del('veic', b.dataset.del)));
+}
+$('#vNew').addEventListener('click', () => openForm('veic', null));
+$('#vTemplate').addEventListener('click', () => {
+  const ws = XLSX.utils.aoa_to_sheet([['Placa','Nome','Lugares','Turnos'],['SXH3F31','SPIN',7,''],['SXZ4D25','MOBI 05',5,data.turno[0]?.nome||'']]);
+  ws['!cols'] = [{wch:12},{wch:16},{wch:10},{wch:30}];
+  const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Frota'); XLSX.writeFile(wb, 'modelo-frota.xlsx');
+});
+$('#vImport').addEventListener('change', async e => {
+  const file = e.target.files[0]; e.target.value = ''; if (!file) return;
+  try{
+    const wb = XLSX.read(await file.arrayBuffer());
+    const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], {defval:''});
+    const norm = s => String(s).normalize('NFD').replace(/[̀-ͯ]/g,'').toLowerCase().trim();
+    const pick = (r, names) => { const k = Object.keys(r).find(k => names.includes(norm(k))); return k ? String(r[k]).trim() : ''; };
+    const plateKey = s => String(s).toUpperCase().replace(/[^A-Z0-9]/g,'');
+    const byPlate = new Map(data.veic.filter(v=>v.placa).map(v => [plateKey(v.placa), v]));
+    let novos = 0, atual = 0, semLug = 0, turnoNaoAchado = 0; const list = [];
+    rows.forEach(r => {
+      const placa = plateKey(pick(r, ['placa'])), nome = pick(r, ['nome','veiculo','modelo','identificacao']);
+      if (!placa && !nome) return;
+      const lugares = parseInt(pick(r, ['lugares','capacidade','assentos','lotacao']), 10);
+      if (!(lugares > 1)) semLug++;
+      const tTxt = pick(r, ['turnos','turno']);
+      let turnos = [];
+      if (tTxt){ tTxt.split(/[;,/]/).map(norm).filter(Boolean).forEach(tn => { const t = data.turno.find(t => norm(t.nome) === tn); if (t) turnos.push(t.id); else turnoNaoAchado++; }); }
+      const old = placa && byPlate.get(placa);
+      const v = old ? {...old} : {ativo:true, turnos:[]};
+      v.placa = placa; v.nome = nome || old?.nome || placa;
+      if (lugares > 1) v.capacidade = lugares; else if (!old) v.capacidade = 5;
+      if (tTxt) v.turnos = turnos;
+      delete v.exemplo;
+      old ? atual++ : novos++;
+      list.push(v);
+    });
+    if (!list.length){ toast('Nenhuma linha com "Placa" ou "Nome" foi encontrada.', 5000); return; }
+    await Store.saveMany('veic', list); plan = null;
+    toast(`${novos} veículo${novos!==1?'s':''} novo${novos!==1?'s':''}, ${atual} atualizado${atual!==1?'s':''}` + (semLug?`. ${semLug} sem lugares válidos (ficou 5)`:'') + (turnoNaoAchado?`. ${turnoNaoAchado} turno(s) não reconhecido(s)`:'') + '.', 6500);
+  }catch(err){ toast('Não foi possível ler a planilha: ' + err.message, 6000); }
+});
+
+/* ---------------- Turnos ---------------- */
+function renderTurnos(){
+  if (!data.turno.length){ $('#tTable').innerHTML = '<div class="empty">Nenhum turno cadastrado. Clique em <b>+ Novo turno</b>.</div>'; return; }
+  const list = data.turno.slice().sort((a,b)=>(a.entrada||'').localeCompare(b.entrada||''));
+  $('#tTable').innerHTML = `<div class="table-wrap"><table>
+    <thead><tr><th>Turno</th><th>Entrada</th><th>Saída</th><th class="num">Chegar antes</th><th class="num">Funcionários</th><th class="num">Com CNH</th><th class="num">Veículos</th><th class="num">Lugares</th><th></th></tr></thead>
+    <tbody>${list.map(t => { const nf = data.func.filter(f=>f.turnoId===t.id && f.ativo!==false).length; const nc = data.func.filter(f=>f.turnoId===t.id && f.ativo!==false && (f.cnh==='pode'||f.cnh==='fixo')).length; const vs = vehiclesFor(t.id); const cap = vs.reduce((a,v)=>a+(+v.capacidade||0),0);
+      return `<tr>
+      <td><b>${esc(t.nome)}</b></td><td class="mono">${esc(t.entrada)}</td><td class="mono">${esc(t.saida)}${t.saida<=t.entrada?' <span class="sub">dia seguinte</span>':''}</td>
+      <td class="num mono">${+t.antecedencia||0} min</td><td class="num mono">${nf}</td><td class="num">${nc<Math.min(vs.length,1)||(nf&&!nc)?'<span class="chip err">0</span>':`<span class="mono">${nc}</span>`}</td><td class="num mono">${vs.length}</td>
+      <td class="num">${cap<nf?`<span class="chip err">${cap} — faltam ${nf-cap}</span>`:`<span class="mono">${cap}</span>`}</td>
+      <td class="act"><button class="icon-btn" data-edit="${t.id}" aria-label="Editar ${esc(t.nome)}">✎</button><button class="icon-btn" data-del="${t.id}" aria-label="Excluir ${esc(t.nome)}">✕</button></td>
+    </tr>`; }).join('')}</tbody></table></div>`;
+  $('#tTable').querySelectorAll('[data-edit]').forEach(b => b.addEventListener('click', () => openForm('turno', data.turno.find(x=>x.id===b.dataset.edit))));
+  $('#tTable').querySelectorAll('[data-del]').forEach(b => b.addEventListener('click', () => del('turno', b.dataset.del)));
+}
+$('#tNew').addEventListener('click', () => openForm('turno', null));
+function vehiclesFor(turnoId){
+  return data.veic.filter(v => v.ativo !== false && (+v.capacidade||0) > 0 && (!(v.turnos&&v.turnos.length) || v.turnos.includes(turnoId)));
+}
+
+/* ---------------- Configurações ---------------- */
+function renderConfig(){
+  const c = cfg();
+  if (document.activeElement?.closest('#tab-config')) return;
+  $('#cNome').value = c.nome || ''; $('#cEnd').value = c.endereco || '';
+  $('#cDwell').value = c.dwell; $('#cAfter').value = c.after; $('#cRegion').checked = !!c.region; $('#cKey').value = c.tomtomKey || '';
+  $('#cGeo').innerHTML = c.geo ? `✓ ${esc(c.geo.label)}` : '<span style="color:var(--red)">Endereço da empresa ainda não localizado. Salve com a chave da TomTom preenchida.</span>';
+  $('#modeNotice').innerHTML = useFirebase ? '' : `<div class="notice"><b>Modo local.</b> Os dados ficam só neste navegador e há exemplos carregados para teste. Para compartilhar com a equipe, cole o <span class="mono">firebaseConfig</span> do seu projeto no início do arquivo HTML. ${data.func.some(f=>f.exemplo)||data.veic.some(v=>v.exemplo)?'<button class="btn small" id="clearEx" type="button" style="margin-top:8px">Remover dados de exemplo</button>':''}</div>`;
+  $('#clearEx')?.addEventListener('click', () => {
+    data.func = data.func.filter(x=>!x.exemplo); data.veic = data.veic.filter(x=>!x.exemplo); data.turno = data.turno.filter(x=>!x.exemplo);
+    Local.persist(); plan = null; renderAll(); toast('Exemplos removidos.');
+  });
+}
+$('#cSave').addEventListener('click', async () => {
+  const btn = $('#cSave'); btn.disabled = true;
+  const patch = {nome:$('#cNome').value.trim(), endereco:$('#cEnd').value.trim(), dwell:+$('#cDwell').value||0, after:+$('#cAfter').value||0, region:$('#cRegion').checked, tomtomKey:$('#cKey').value.trim()};
+  const c = cfg();
+  try{
+    if (patch.endereco && (patch.endereco !== c.endereco || !c.geo)){
+      data.config.tomtomKey = patch.tomtomKey; data.config.region = patch.region;
+      patch.geo = await geocode(patch.endereco);
+      if (!patch.geo) toast('Endereço da empresa não encontrado. Tente rua, número e cidade, ou coordenadas.', 5000);
+    }
+    await Store.setConfig(patch); toast('Configurações salvas.');
+  }catch(e){ toast(e.message, 5000); await Store.setConfig(patch); }
+  btn.disabled = false; document.activeElement?.blur(); renderConfig();
+});
+
+/* ---------------- Formulários ---------------- */
+const FORMS = {
+  func:{title:'funcionário', fields:[
+    {k:'nome', label:'Nome', type:'text', req:true, full:true},
+    {k:'endereco', label:'Endereço de embarque (rua, número, bairro, cidade) ou lat, lon', type:'text', req:true, full:true},
+    {k:'turnoId', label:'Turno', type:'turno'},
+    {k:'telefone', label:'Telefone', type:'tel'},
+    {k:'cnh', label:'Direção', type:'select', def:'nao', options:[['nao','Não dirige'],['pode','Tem CNH (pode ser escolhido motorista)'],['fixo','Motorista fixo do turno']]},
+    {k:'veiculoFixo', label:'Carro do motorista fixo (opcional)', type:'veiculo'},
+    {k:'ativo', label:'Ativo (usa o transporte)', type:'checkbox', def:true, full:true}
+  ]},
+  veic:{title:'veículo', fields:[
+    {k:'nome', label:'Identificação (ex.: Spin 01)', type:'text', req:true},
+    {k:'placa', label:'Placa', type:'text'},
+    {k:'capacidade', label:'Lugares, contando o motorista', type:'number', req:true, min:2, def:5},
+    {k:'turnos', label:'Disponível nos turnos (nenhum marcado = todos)', type:'turnos', full:true},
+    {k:'ativo', label:'Ativo', type:'checkbox', def:true, full:true}
+  ]},
+  turno:{title:'turno', fields:[
+    {k:'nome', label:'Nome', type:'text', req:true, full:true},
+    {k:'entrada', label:'Entrada', type:'time', req:true},
+    {k:'saida', label:'Saída', type:'time', req:true},
+    {k:'antecedencia', label:'Chegar à empresa antes da entrada (min)', type:'number', min:0, def:10, full:true}
+  ]}
+};
+function openForm(kind, obj){
+  const spec = FORMS[kind], o = obj || {};
+  const f = $('#dlgForm');
+  f.innerHTML = `<h3>${obj ? 'Editar' : 'Novo'} ${spec.title}</h3><div class="grid">` + spec.fields.map(fd => {
+    const v = o[fd.k] ?? fd.def ?? '';
+    const id = `fld-${fd.k}`, cls = fd.full ? 'full' : '';
+    if (fd.type === 'checkbox') return `<label class="check ${cls}"><input type="checkbox" id="${id}" ${v?'checked':''}> <span>${fd.label}</span></label>`;
+    if (fd.type === 'select') return `<label class="field ${cls}">${fd.label}<select id="${id}">${fd.options.map(([val,txt]) => `<option value="${val}" ${val===v?'selected':''}>${txt}</option>`).join('')}</select></label>`;
+    if (fd.type === 'veiculo') return `<label class="field ${cls}">${fd.label}<select id="${id}"><option value="">— qualquer carro —</option>${data.veic.filter(x=>x.ativo!==false).map(x => `<option value="${x.id}" ${x.id===v?'selected':''}>${esc(x.nome)} (${+x.capacidade} lugares)</option>`).join('')}</select></label>`;
+    if (fd.type === 'turno') return `<label class="field ${cls}">${fd.label}<select id="${id}"><option value="">— sem turno —</option>${turnoOptions(v,false)}</select></label>`;
+    if (fd.type === 'turnos') return `<fieldset class="field ${cls}" style="border:0;padding:0;margin:0"><legend style="padding:0;margin-bottom:4px">${fd.label}</legend><div class="checks">${data.turno.map(t => `<label class="check"><input type="checkbox" name="turnos" value="${t.id}" ${(v||[]).includes(t.id)?'checked':''}> <span>${esc(t.nome)}</span></label>`).join('') || '<span class="hint">Cadastre turnos primeiro.</span>'}</div></fieldset>`;
+    return `<label class="field ${cls}">${fd.label}<input type="${fd.type}" id="${id}" value="${esc(v)}" ${fd.req?'required':''} ${fd.min!=null?`min="${fd.min}"`:''}></label>`;
+  }).join('') + `</div><p class="hint" id="dlgMsg"></p><div class="dlg-actions"><button class="btn ghost" type="button" id="dlgCancel">Cancelar</button><button class="btn accent" id="dlgSave" value="ok">Salvar</button></div>`;
+  $('#dlgCancel').onclick = () => $('#dlg').close();
+  f.onsubmit = async ev => {
+    ev.preventDefault();
+    const out = {...o};
+    spec.fields.forEach(fd => {
+      if (fd.type === 'checkbox') out[fd.k] = $(`#fld-${fd.k}`).checked;
+      else if (fd.type === 'turnos') out[fd.k] = [...f.querySelectorAll('input[name=turnos]:checked')].map(i=>i.value);
+      else if (fd.type === 'number') out[fd.k] = +$(`#fld-${fd.k}`).value || 0;
+      else if (fd.type === 'turno' || fd.type === 'select' || fd.type === 'veiculo') out[fd.k] = $(`#fld-${fd.k}`).value;
+      else out[fd.k] = $(`#fld-${fd.k}`).value.trim();
+    });
+    delete out.exemplo;
+    if (kind === 'func' && out.cnh !== 'fixo') out.veiculoFixo = '';
+    const btn = $('#dlgSave'); btn.disabled = true;
+    try{
+      if (kind === 'func' && out.endereco && (out.endereco !== o.endereco || !o.geo)){
+        $('#dlgMsg').textContent = 'Localizando endereço…';
+        try{ out.geo = await geocode(out.endereco); }
+        catch(e){ out.geo = parseCoords(out.endereco); toast(e.message, 4500); }
+        if (!out.geo) toast('Salvo, mas o endereço não foi encontrado. Revise ou use coordenadas (lat, lon).', 5000);
+      }
+      await Store.save(kind, out); $('#dlg').close(); plan = null;
+    }catch(e){ $('#dlgMsg').textContent = 'Erro ao salvar: ' + e.message; }
+    btn.disabled = false;
+  };
+  $('#dlg').showModal();
+}
+async function del(kind, id){
+  const o = data[kind].find(x => x.id === id); if (!o) return;
+  const extra = kind === 'turno' ? ' Os funcionários deste turno ficarão sem turno.' : '';
+  if (!confirm(`Excluir "${o.nome}"?${extra}`)) return;
+  try{ await Store.remove(kind, id); plan = null; toast('Excluído.'); }catch(e){ toast('Erro: ' + e.message, 5000); }
+}
+
+/* ---------------- Mapa ---------------- */
+const map = L.map('map', {minZoom:6}).fitBounds([[-26.75,-49.3],[-25.85,-48.45]]);
+const darkMq = window.matchMedia('(prefers-color-scheme: dark)');
+const isDark = () => { const t = document.documentElement.getAttribute('data-theme'); return t ? t === 'dark' : darkMq.matches; };
+let baseLayer;
+function setBase(){
+  if (baseLayer) map.removeLayer(baseLayer);
+  baseLayer = L.tileLayer(`https://{s}.basemaps.cartocdn.com/${isDark()?'dark_all':'rastertiles/voyager'}/{z}/{x}/{y}{r}.png`,
+    {subdomains:'abcd', maxZoom:19, attribution:'&copy; OpenStreetMap &copy; CARTO | Rotas &copy; TomTom'}).addTo(map);
+}
+setBase(); darkMq.addEventListener?.('change', setBase);
+const layer = L.layerGroup().addTo(map);
+let trafficLayer = null;
+$('#trafficBtn').addEventListener('click', () => {
+  const b = $('#trafficBtn');
+  if (trafficLayer){ map.removeLayer(trafficLayer); trafficLayer = null; b.setAttribute('aria-pressed','false'); return; }
+  const key = cfg().tomtomKey; if (!key){ toast('Configure a chave da TomTom em Configurações.'); return; }
+  trafficLayer = L.tileLayer(`https://api.tomtom.com/traffic/map/4/tile/flow/relative0/{z}/{x}/{y}.png?key=${encodeURIComponent(key)}`, {maxZoom:18, opacity:.85}).addTo(map);
+  b.setAttribute('aria-pressed','true');
+});
+const icon = (html, cls, w=24, h=24) => L.divIcon({className:'', html:`<div class="mk ${cls}">${html}</div>`, iconSize:[w,h], iconAnchor:[w/2,h/2]});
+
+/* ---------------- Planejamento ---------------- */
+let plan = null, viewDir = 'ida', viewTurno = 0, focusVeh = null;
+$('#rDate').value = addDays(ymd(new Date()), 1);
+$('#rTurno').addEventListener('change', () => { plan = null; renderPre(); renderResults(); drawMap(); });
+$('#rDate').addEventListener('change', () => { plan = null; renderResults(); });
+$('#vIda').addEventListener('click', () => setDir('ida'));
+$('#vVolta').addEventListener('click', () => setDir('volta'));
+function setDir(d){ viewDir = d; $('#vIda').setAttribute('aria-pressed', String(d==='ida')); $('#vVolta').setAttribute('aria-pressed', String(d==='volta')); renderResults(); drawMap(); }
+$('#showAllBtn').addEventListener('click', () => { focusVeh = null; renderResults(); drawMap(); });
+
+function selectedTurnos(){
+  const id = $('#rTurno').value;
+  const ts = data.turno.slice().sort((a,b)=>(a.entrada||'').localeCompare(b.entrada||''));
+  return id ? ts.filter(t => t.id === id) : ts;
+}
+const canDrive = f => f.cnh === 'pode' || f.cnh === 'fixo';
+function renderPre(){
+  const ts = selectedTurnos();
+  const emps = data.func.filter(f => f.ativo !== false && ts.some(t => t.id === f.turnoId));
+  const one = ts.length === 1;
+  const vehs = one ? vehiclesFor(ts[0].id) : data.veic.filter(v => v.ativo !== false);
+  $('#preSum').innerHTML = `
+    <div class="stat"><b>${emps.length}</b><span>funcionários</span></div>
+    <div class="stat"><b>${emps.filter(canDrive).length}</b><span>com CNH</span></div>
+    <div class="stat"><b>${vehs.length}</b><span>carros${one?'':' (frota)'}</span></div>`;
+  const w = [], c = cfg();
+  if (!c.tomtomKey) w.push('Configure a chave da TomTom em <b>Configurações</b>.');
+  if (!c.geo) w.push('Localize o endereço da empresa em <b>Configurações</b>.');
+  if (!data.turno.length) w.push('Cadastre os turnos na aba <b>Turnos</b>.');
+  const noGeo = emps.filter(f => !f.geo);
+  if (noGeo.length) w.push(`${noGeo.length} funcionário${noGeo.length>1?'s':''} sem localização ficará${noGeo.length>1?'ão':''} de fora. Use <b>Localizar endereços pendentes</b> na aba Funcionários.`);
+  ts.forEach(t => {
+    const es = data.func.filter(f => f.ativo!==false && f.turnoId===t.id && f.geo); if (!es.length) return;
+    const cars = vehiclesFor(t.id).sort((a,b)=>b.capacidade-a.capacidade), cnh = es.filter(canDrive).length;
+    const k = Math.min(cars.length, cnh), cap = cars.slice(0,k).reduce((a,v)=>a+(+v.capacidade||0),0);
+    if (!cnh) w.push(`${esc(t.nome)}: nenhum funcionário com CNH cadastrado.`);
+    else if (cap < es.length) w.push(`${esc(t.nome)}: ${es.length} pessoas e só ${cap} lugares (${k} carro${k>1?'s':''}${cnh<cars.length?`, limitado por ${cnh} motorista${cnh>1?'s':''} com CNH`:''}). ${es.length-cap} ficarão sem rota.`);
+  });
+  $('#preWarn').innerHTML = w.length ? `<div class="notice">${w.join('<br>')}</div>` : '';
+}
+
+/* ---------------- Otimizador ----------------
+   Cada rota = um carro + um motorista (funcionário com CNH) que mora na ponta da rota.
+   Ida: casa do motorista → colegas → empresa. Volta: empresa → colegas → casa do motorista.
+   Custo = 1,6 × km da rota + 0,6 × km que cada passageiro passa a bordo.
+   Distâncias estimadas (linha reta × 1,35); os horários finais vêm da TomTom com trânsito. */
+const W = 0.6;
+function routeCost(r){
+  const n = r.stops.length;
+  const pts = [r.start, ...r.stops.map(s=>s.geo), r.end];
+  const seg = []; for (let i = 0; i < pts.length-1; i++) seg.push(km(pts[i], pts[i+1]));
+  const path = seg.reduce((a,b)=>a+b,0);
+  let onboard = 0, acc = 0;
+  if (r.dir === 'volta'){ for (let i = 0; i < n; i++){ acc += seg[i]; onboard += acc; } }
+  else { for (let i = n; i >= 1; i--){ acc += seg[i]; onboard += acc; } }
+  return (1+W)*path + W*onboard;
+}
+function twoOpt(r){
+  let any = false, again = true, cur = routeCost(r);
+  while (again){
+    again = false;
+    for (let i = 0; i < r.stops.length - 1; i++) for (let k = i+1; k < r.stops.length; k++){
+      const old = r.stops.slice();
+      r.stops.splice(i, k-i+1, ...r.stops.slice(i,k+1).reverse());
+      const c = routeCost(r);
+      if (c < cur - 0.01){ cur = c; again = any = true; } else r.stops = old;
+    }
+  }
+  return any;
+}
+function bestInsert(r, e){
+  if (r.stops.length >= r.cap) return null;
+  let best = null;
+  for (let p = 0; p <= r.stops.length; p++){
+    r.stops.splice(p, 0, e); const delta = routeCost(r) - r.cost; r.stops.splice(p, 1);
+    if (!best || delta < best.delta) best = {delta, pos:p};
+  }
+  return best;
+}
+function improve(routes){
+  for (let iter = 0; iter < 40; iter++){
+    let improved = false;
+    routes.forEach(r => { if (twoOpt(r)) improved = true; r.cost = routeCost(r); });
+    // mover um passageiro para outro carro
+    for (const ra of routes) for (let i = 0; i < ra.stops.length; i++){
+      const e = ra.stops[i]; ra.stops.splice(i, 1);
+      const gain = ra.cost - routeCost(ra);
+      let best = null, br = null;
+      routes.forEach(rb => { if (rb === ra) return; const ins = bestInsert(rb, e); if (ins && ins.delta < gain - 0.05 && (!best || ins.delta < best.delta)){ best = ins; br = rb; } });
+      if (br){ br.stops.splice(best.pos, 0, e); br.cost = routeCost(br); ra.cost = routeCost(ra); improved = true; i--; }
+      else ra.stops.splice(i, 0, e);
+    }
+    // trocar dois passageiros de carro
+    for (let x = 0; x < routes.length; x++) for (let y = x+1; y < routes.length; y++){
+      const A = routes[x], B = routes[y];
+      for (let i = 0; i < A.stops.length; i++) for (let j = 0; j < B.stops.length; j++){
+        const ea = A.stops[i], eb = B.stops[j]; A.stops[i] = eb; B.stops[j] = ea;
+        const ca = routeCost(A), cb = routeCost(B);
+        if (ca + cb < A.cost + B.cost - 0.05){ A.cost = ca; B.cost = cb; improved = true; } else { A.stops[i] = ea; B.stops[j] = eb; }
+      }
+    }
+    // trocar o motorista por um passageiro com CNH do mesmo carro (quem mora mais na ponta)
+    for (const r of routes){
+      if (r.driver.cnh === 'fixo') continue;
+      let best = null;
+      r.stops.forEach((p, i) => {
+        if (!canDrive(p)) return;
+        const cand = {start:p.geo, end:r.end, dir:'ida', cap:r.cap, stops:r.stops.filter((_,k)=>k!==i)};
+        cand.cost = routeCost(cand);
+        const ins = bestInsert(cand, r.driver); if (!ins) return;
+        cand.stops.splice(ins.pos, 0, r.driver); twoOpt(cand); const c = routeCost(cand);
+        if (c < r.cost - 0.05 && (!best || c < best.c)) best = {c, p, stops:cand.stops};
+      });
+      if (best){ r.driver = best.p; r.start = best.p.geo; r.stops = best.stops; r.cost = best.c; improved = true; }
+    }
+    if (!improved) break;
+  }
+}
+function rng(seed){ return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+function planShift(emps, vehs, company, fewer){
+  const N = emps.length;
+  const cars = vehs.slice().sort((a,b) => (+b.capacidade||0) - (+a.capacidade||0));
+  const cnh = emps.filter(canDrive), fixed = emps.filter(e => e.cnh === 'fixo');
+  const maxK = Math.min(cars.length, cnh.length, N);
+  if (!maxK) return {routes:[], unassigned:emps.slice(), reason: !cars.length ? 'Nenhum carro disponível neste turno.' : 'Nenhum funcionário com CNH neste turno.'};
+  const topCap = k => cars.slice(0,k).reduce((a,v)=>a+(+v.capacidade||0),0);
+  let k = fewer ? Math.max(1, Math.min(fixed.length, maxK)) : maxK;
+  if (fewer) while (k < maxK && topCap(k) < N) k++;
+  let best = null;
+  while (true){
+    for (let s = 0; s < 8; s++){
+      const rand = rng(1000 + s*7919);
+      const drivers = [], carsLeft = cars.slice();
+      fixed.slice(0, k).forEach(f => {
+        const ci = f.veiculoFixo ? carsLeft.findIndex(c => c.id === f.veiculoFixo) : -1;
+        drivers.push({e:f, car: ci >= 0 ? carsLeft.splice(ci,1)[0] : null, locked: ci >= 0});
+      });
+      const pool = cnh.filter(c => !drivers.some(d => d.e === c));
+      while (drivers.length < k && pool.length){
+        const score = c => (drivers.length ? Math.min(...drivers.map(d => km(c.geo, d.e.geo))) : 0) + 0.4*km(c.geo, company);
+        pool.sort((a,b) => score(b) - score(a));
+        const idx = s === 0 ? 0 : Math.floor(rand() * Math.min(3, pool.length));
+        drivers.push({e:pool.splice(idx,1)[0], car:null});
+      }
+      const routes = drivers.map(d => ({driver:d.e, car:d.car, locked:!!d.locked, start:d.e.geo, end:company, stops:[], dir:'ida'}));
+      routes.filter(r => !r.car).sort((a,b) => km(b.start,company) - km(a.start,company)).forEach(r => { r.car = carsLeft.shift(); });
+      routes.forEach(r => { r.cap = Math.max(0, (+r.car.capacidade||0) - 1); r.cost = routeCost(r); });
+      const unassigned = [];
+      emps.filter(e => !drivers.some(d => d.e === e)).sort((x,y) => km(y.geo,company) - km(x.geo,company)).forEach(e => {
+        let bi = null, br = null;
+        routes.forEach(r => { const b = bestInsert(r, e); if (b && (!bi || b.delta < bi.delta)){ bi = b; br = r; } });
+        if (br){ br.stops.splice(bi.pos, 0, e); br.cost = routeCost(br); } else unassigned.push(e);
+      });
+      improve(routes);
+      const total = routes.reduce((a,r)=>a+r.cost,0) + 1000*unassigned.length;
+      if (!best || total < best.total) best = {routes, unassigned, total, k};
+    }
+    if (best.unassigned.length && k < maxK){ k++; best = null; continue; }
+    break;
+  }
+  return best;
+}
+
+async function buildTurno(t, dateStr, step){
+  const c = cfg(), dwell = (+c.dwell||0)*60, company = c.geo;
+  const emps = data.func.filter(f => f.ativo !== false && f.turnoId === t.id && f.geo);
+  const res = {turno:t, date:dateStr, routes:[], unassigned:[], reason:'', skipped: data.func.filter(f => f.ativo!==false && f.turnoId===t.id && !f.geo)};
+  if (!emps.length) return res;
+  const target = new Date(at(dateStr, t.entrada).getTime() - (+t.antecedencia||0)*60000);
+  const outDate = (t.saida <= t.entrada) ? addDays(dateStr, 1) : dateStr;
+  const leaveCo = new Date(at(outDate, t.saida).getTime() + (+c.after||0)*60000);
+  if (target.getTime() < Date.now() + 5*60000) throw new Error(`${t.nome}: a chegada de ${fmtDate(target)} às ${fmtTime(target)} já passou. Escolha uma data futura.`);
+  const pl = planShift(emps, vehiclesFor(t.id), company, $('#rFewer').checked);
+  res.unassigned = pl.unassigned; res.reason = pl.reason || '';
+  for (const [ri, r] of pl.routes.entries()){
+    const color = ROUTE_COLORS[ri % ROUTE_COLORS.length];
+    // IDA: casa do motorista → colegas → empresa, chegando no horário-alvo
+    const ptsIda = [r.start, ...r.stops.map(s=>s.geo), company];
+    let estKm = 0; for (let i = 0; i < ptsIda.length-1; i++) estKm += km(ptsIda[i], ptsIda[i+1]);
+    let dep = new Date(target.getTime() - (estKm/40*3600 + dwell*r.stops.length)*1000);
+    let rt = await routeTT(ptsIda, dep); step();
+    dep = new Date(target.getTime() - (rt.travel + dwell*r.stops.length)*1000);
+    rt = await routeTT(ptsIda, dep); step();
+    let tt = dep.getTime(); const ida = [];
+    rt.legs.forEach((l, i) => { tt += l.travelTimeInSeconds*1000; if (i < r.stops.length){ ida.push({f:r.stops[i], at:new Date(tt)}); tt += dwell*1000; } });
+    const arrCo = new Date(tt);
+    ida.forEach(s => { s.onboard = (arrCo - s.at)/1000; });
+    // VOLTA: empresa → colegas → casa do motorista (último do trajeto)
+    const vr = {start:company, end:r.start, stops:r.stops.slice().reverse(), dir:'volta'}; twoOpt(vr);
+    const rv = await routeTT([company, ...vr.stops.map(s=>s.geo), r.start], leaveCo); step();
+    tt = leaveCo.getTime(); const volta = [];
+    rv.legs.forEach((l, i) => { tt += l.travelTimeInSeconds*1000; if (i < vr.stops.length){ volta.push({f:vr.stops[i], at:new Date(tt), onboard:(tt-leaveCo.getTime())/1000}); tt += dwell*1000; } });
+    res.routes.push({v:r.car, driver:r.driver, color,
+      ida:{dep, arr:arrCo, stops:ida, line:rt.line, meters:rt.meters, travel:rt.travel, delay:Math.max(0, rt.travel-rt.free)},
+      volta:{dep:leaveCo, arr:new Date(tt), stops:volta, line:rv.line, meters:rv.meters, travel:rv.travel, delay:Math.max(0, rv.travel-rv.free)}});
+  }
+  return res;
+}
+
+$('#runBtn').addEventListener('click', async () => {
+  const c = cfg(), ts = selectedTurnos(), dateStr = $('#rDate').value;
+  if (!c.tomtomKey){ toast('Configure a chave da TomTom em Configurações.'); showTab('config'); return; }
+  if (!c.geo){ toast('Localize o endereço da empresa em Configurações.'); showTab('config'); return; }
+  if (!ts.length){ toast('Cadastre pelo menos um turno.'); return; }
+  if (!dateStr){ toast('Escolha a data.'); return; }
+  const btn = $('#runBtn'); btn.disabled = true; plan = null; focusVeh = null; viewTurno = 0;
+  let total = 0; ts.forEach(t => { const es = data.func.filter(f=>f.ativo!==false&&f.turnoId===t.id&&f.geo); total += 3*Math.max(1, Math.min(vehiclesFor(t.id).length, es.filter(canDrive).length)); });
+  let done = 0; const step = () => { done++; $('#bar').style.width = Math.min(100, done/total*100) + '%'; };
+  const out = [];
+  try{
+    for (const t of ts){ setStatus(`Montando ${t.nome}…`); await sleep(20); out.push(await buildTurno(t, dateStr, step)); }
+    plan = out; setStatus(`Rotas prontas · ${done} consultas de rota com trânsito.`);
+  }catch(e){ console.error(e); setStatus(e.message || String(e), true); if (out.length) plan = out; }
+  btn.disabled = false; setTimeout(()=>{ $('#bar').style.width = '0'; }, 800);
+  renderResults(); drawMap();
+});
+function setStatus(msg, err){ const s = $('#status'); s.textContent = msg; s.classList.toggle('err', !!err); }
+
+function onboardCls(sec){ return sec > 90*60 ? 'vlong' : sec > 60*60 ? 'long' : ''; }
+function renderResults(){
+  const el = $('#results');
+  $('#resActions').hidden = !plan;
+  $('#showAllBtn').hidden = focusVeh == null;
+  if (!plan){ el.innerHTML = '<div class="empty">Escolha o turno e a data e clique em <b>Montar rotas</b>. O sistema escolhe os motoristas entre quem tem CNH, morando na ponta de cada rota, e divide os colegas entre os carros.</div>'; return; }
+  el.innerHTML = plan.map((p, pi) => {
+    const pax = p.routes.reduce((a,r)=>a+r.ida.stops.length+1,0);
+    const kmTot = p.routes.reduce((a,r)=>a+r[viewDir].meters,0);
+    const warn = [];
+    if (p.reason) warn.push(`<b>${esc(p.reason)}</b>`);
+    if (p.unassigned.length) warn.push(`<b>${p.unassigned.length} sem rota</b> (faltam lugares ou motoristas): ${p.unassigned.map(f=>esc(f.nome)).join(', ')}`);
+    if (p.skipped.length) warn.push(`<b>${p.skipped.length} sem localização</b>: ${p.skipped.map(f=>esc(f.nome)).join(', ')}`);
+    const cards = p.routes.map(r => {
+      const d = r[viewDir], key = r.driver.id;
+      const dim = focusVeh != null && !(focusVeh.p===pi && focusVeh.id===key);
+      const open = focusVeh && focusVeh.p===pi && focusVeh.id===key;
+      const drv = `<span class="n" style="background:${r.color}">M</span>`;
+      const first = viewDir==='ida'
+        ? `<li>${drv}<div class="who2"><b>${esc(r.driver.nome)} sai de casa dirigindo</b><span>${esc(r.driver.endereco)}</span></div><div class="t">${fmtTime(d.dep)}<small class="${onboardCls(d.arr-d.dep>0?(d.arr-d.dep)/1000:0)}">${fmtDur((d.arr-d.dep)/1000)} ao volante</small></div></li>`
+        : `<li><span class="n sq">CD</span><div class="who2"><b>Sai da empresa</b></div><div class="t">${fmtTime(d.dep)}</div></li>`;
+      const last = viewDir==='ida'
+        ? `<li><span class="n sq">CD</span><div class="who2"><b>Chega à empresa</b><span>${esc(p.turno.nome)} entra ${p.turno.entrada}</span></div><div class="t">${fmtTime(d.arr)}</div></li>`
+        : `<li>${drv}<div class="who2"><b>${esc(r.driver.nome)} chega em casa</b><span>${esc(r.driver.endereco)}</span></div><div class="t">${fmtTime(d.arr)}<small class="${onboardCls((d.arr-d.dep)/1000)}">${fmtDur((d.arr-d.dep)/1000)} ao volante</small></div></li>`;
+      return `<div class="vcard ${dim?'dim':''}">
+        <div class="vhead" data-p="${pi}" data-v="${key}" tabindex="0" role="button" aria-expanded="${!!open}">
+          <span class="sw" style="background:${r.color}"></span>
+          <div><b>${esc(r.v.nome)}</b> <span class="meta">${esc(r.v.placa||'')}</span>
+            <div class="meta">Motorista: <b style="font-weight:600;color:var(--fg)">${esc(r.driver.nome)}</b>${r.driver.cnh==='fixo'?' (fixo)':''}</div>
+            <div class="meta">${d.stops.length+1}/${r.v.capacidade} lugares · ${fmtKm(d.meters)} · ${fmtDur(d.travel)}${d.delay>=120?` · <span class="long">+${fmtDur(d.delay)} trânsito</span>`:''}</div></div>
+          <div class="times">${fmtTime(d.dep)} → ${fmtTime(d.arr)}<small>${viewDir==='ida'?'casa → empresa':'empresa → casa'}</small></div>
+        </div>
+        ${open ? `<div class="vbody"><ol class="itin">${first}${d.stops.map((s,i)=>`<li><span class="n" style="background:${r.color}">${i+1}</span><div class="who2"><b>${esc(s.f.nome)}</b><span>${esc(s.f.endereco)}</span></div><div class="t">${fmtTime(s.at)}<small class="${onboardCls(s.onboard)}">${fmtDur(s.onboard)} a bordo</small></div></li>`).join('')}${last}</ol>
+          <div class="btn-row"><button class="btn small" data-copy="${pi}|${key}" type="button">Copiar rota para o motorista</button></div></div>` : ''}
+      </div>`;
+    }).join('');
+    return `<div class="turno-res">
+      <div class="turno-head ${pi===viewTurno?'sel':''}" data-t="${pi}"><h4>${esc(p.turno.nome)} · ${fmtDate(at(p.date,'12:00'))}</h4><span class="hint">${p.routes.length} carro${p.routes.length!==1?'s':''} · ${pax} pessoas · ${fmtKm(kmTot)}</span></div>
+      ${warn.length ? `<div class="notice err">${warn.join('<br>')}</div>` : ''}
+      ${cards || '<div class="empty">Nenhuma rota neste turno.</div>'}
+    </div>`;
+  }).join('');
+  el.querySelectorAll('.turno-head').forEach(h => h.addEventListener('click', () => { viewTurno = +h.dataset.t; focusVeh = null; renderResults(); drawMap(); }));
+  el.querySelectorAll('.vhead').forEach(h => {
+    const go = () => { const p = +h.dataset.p, id = h.dataset.v; viewTurno = p; focusVeh = (focusVeh && focusVeh.p===p && focusVeh.id===id) ? null : {p, id}; renderResults(); drawMap(); };
+    h.addEventListener('click', go); h.addEventListener('keydown', e => { if (e.key==='Enter'||e.key===' '){ e.preventDefault(); go(); } });
+  });
+  el.querySelectorAll('[data-copy]').forEach(b => b.addEventListener('click', () => { const [p, id] = b.dataset.copy.split('|'); copyRoute(plan[+p], plan[+p].routes.find(r=>r.driver.id===id)); }));
+}
+
+function drawMap(){
+  layer.clearLayers();
+  const c = cfg(), bounds = [];
+  if (c.geo){ L.marker([c.geo.lat,c.geo.lon], {icon:icon('CD','co',36,28), zIndexOffset:2000}).bindPopup(`<b>${esc(c.nome||'Empresa')}</b><br>${esc(c.geo.label)}`).addTo(layer); bounds.push([c.geo.lat,c.geo.lon]); }
+  const p = plan && plan[viewTurno];
+  if (!p){
+    const ts = selectedTurnos();
+    data.func.filter(f => f.geo && f.ativo !== false && ts.some(t=>t.id===f.turnoId)).forEach(f => {
+      const drive = canDrive(f), sz = drive ? 16 : 12;
+      L.marker([f.geo.lat,f.geo.lon], {icon:L.divIcon({className:'', html:`<div class="mk dot" style="width:${sz}px;height:${sz}px;background:${drive?'#0f6b47':'#7d8a84'}"></div>`, iconSize:[sz,sz], iconAnchor:[sz/2,sz/2]}), zIndexOffset: drive?500:0})
+        .bindPopup(`<b>${esc(f.nome)}</b><br>${esc(turnoById(f.turnoId)?.nome||'')}${drive?' · tem CNH':''}<br>${esc(f.endereco)}`).addTo(layer);
+      bounds.push([f.geo.lat,f.geo.lon]);
+    });
+  } else {
+    p.routes.forEach(r => {
+      const focused = !focusVeh || focusVeh.id === r.driver.id, d = r[viewDir];
+      if (focused){
+        L.polyline(d.line, {color:'#ffffff', weight:7, opacity:.85}).addTo(layer);
+        L.polyline(d.line, {color:r.color, weight:4, opacity:.95}).bindTooltip(`${r.v.nome} · ${r.driver.nome}`).addTo(layer);
+        d.line.forEach((pt,i) => { if (i % 20 === 0) bounds.push(pt); });
+      } else L.polyline(d.line, {color:r.color, weight:2, opacity:.25}).addTo(layer);
+      const g = r.driver.geo;
+      L.marker([g.lat,g.lon], {icon:L.divIcon({className:'', html:`<div class="mk home" style="background:${r.color}">M</div>`, iconSize:[28,24], iconAnchor:[14,12]}), opacity: focused?1:.4, zIndexOffset:800})
+        .bindPopup(`<b>${esc(r.driver.nome)}</b> · motorista<br>${esc(r.v.nome)}<br>${viewDir==='ida'?'Sai de casa '+fmtTime(d.dep):'Chega em casa '+fmtTime(d.arr)}`).addTo(layer);
+      bounds.push([g.lat,g.lon]);
+      if (focused) d.stops.forEach((s,i) => {
+        L.marker([s.f.geo.lat,s.f.geo.lon], {icon:L.divIcon({className:'', html:`<div class="mk" style="background:${r.color}">${i+1}</div>`, iconSize:[24,24], iconAnchor:[12,12]})})
+          .bindPopup(`<b>${i+1}. ${esc(s.f.nome)}</b><br>${esc(s.f.endereco)}<br>${viewDir==='ida'?'Embarque':'Desembarque'} ${fmtTime(s.at)} · ${fmtDur(s.onboard)} a bordo<br><i>${esc(r.v.nome)} · ${esc(r.driver.nome)}</i>`).addTo(layer);
+        bounds.push([s.f.geo.lat,s.f.geo.lon]);
+      });
+    });
+    p.unassigned.forEach(f => L.marker([f.geo.lat,f.geo.lon], {icon:L.divIcon({className:'', html:'<div class="mk" style="background:#c0392b">!</div>', iconSize:[24,24], iconAnchor:[12,12]})}).bindPopup(`<b>${esc(f.nome)}</b><br>Sem rota (faltam lugares ou motoristas)`).addTo(layer));
+  }
+  if (bounds.length > 1) map.fitBounds(bounds, {padding:[40,40], maxZoom:14});
+}
+
+/* ---------------- Exportar e copiar ---------------- */
+function copyRoute(p, r){
+  const L1 = [`*${r.v.nome}${r.v.placa?' ('+r.v.placa+')':''} · ${p.turno.nome} · ${fmtDate(at(p.date,'12:00'))}*`, `Motorista: ${r.driver.nome}`, '',
+    `*IDA* – sair de casa às ${fmtTime(r.ida.dep)}`];
+  r.ida.stops.forEach((s,i) => L1.push(`${i+1}. ${fmtTime(s.at)} – ${s.f.nome} – ${s.f.endereco}`));
+  L1.push(`Chegada na empresa: ${fmtTime(r.ida.arr)}`, '', `*VOLTA* – sair da empresa às ${fmtTime(r.volta.dep)}`);
+  r.volta.stops.forEach((s,i) => L1.push(`${i+1}. ${fmtTime(s.at)} – ${s.f.nome}`));
+  L1.push(`Chegada em casa: ${fmtTime(r.volta.arr)}`);
+  const txt = L1.join('\n');
+  const done = () => toast('Rota copiada. Cole no WhatsApp do motorista.');
+  navigator.clipboard?.writeText(txt).then(done).catch(() => {
+    const ta = document.createElement('textarea'); ta.value = txt; document.body.appendChild(ta); ta.select();
+    try{ document.execCommand('copy'); done(); }catch{ toast('Não foi possível copiar.'); } ta.remove();
+  });
+}
+$('#exportPlan').addEventListener('click', () => {
+  if (!plan) return;
+  const resumo = [['Turno','Data','Veículo','Placa','Motorista','Telefone motorista','Ocupantes','Lugares','Ida: sai de casa','Ida: chega empresa','Ida km','Volta: sai empresa','Volta: chega em casa','Volta km']];
+  const ida = [['Turno','Veículo','Motorista','Ordem','Funcionário','Endereço','Telefone','Embarque','Tempo a bordo (min)']];
+  const volta = [['Turno','Veículo','Motorista','Ordem','Funcionário','Endereço','Telefone','Desembarque','Tempo a bordo (min)']];
+  const sem = [['Turno','Funcionário','Endereço','Motivo']];
+  plan.forEach(p => {
+    p.routes.forEach(r => {
+      resumo.push([p.turno.nome, p.date, r.v.nome, r.v.placa||'', r.driver.nome, r.driver.telefone||'', r.ida.stops.length+1, +r.v.capacidade, fmtTime(r.ida.dep), fmtTime(r.ida.arr), +(r.ida.meters/1000).toFixed(1), fmtTime(r.volta.dep), fmtTime(r.volta.arr), +(r.volta.meters/1000).toFixed(1)]);
+      ida.push([p.turno.nome, r.v.nome, r.driver.nome, 'Motorista', r.driver.nome, r.driver.endereco, r.driver.telefone||'', 'Sai '+fmtTime(r.ida.dep), Math.round((r.ida.arr-r.ida.dep)/60000)]);
+      r.ida.stops.forEach((s,i) => ida.push([p.turno.nome, r.v.nome, r.driver.nome, i+1, s.f.nome, s.f.endereco, s.f.telefone||'', fmtTime(s.at), Math.round(s.onboard/60)]));
+      r.volta.stops.forEach((s,i) => volta.push([p.turno.nome, r.v.nome, r.driver.nome, i+1, s.f.nome, s.f.endereco, s.f.telefone||'', fmtTime(s.at), Math.round(s.onboard/60)]));
+      volta.push([p.turno.nome, r.v.nome, r.driver.nome, 'Motorista', r.driver.nome, r.driver.endereco, r.driver.telefone||'', 'Chega '+fmtTime(r.volta.arr), Math.round((r.volta.arr-r.volta.dep)/60000)]);
+    });
+    p.unassigned.forEach(f => sem.push([p.turno.nome, f.nome, f.endereco, 'Faltam lugares ou motoristas com CNH']));
+    p.skipped.forEach(f => sem.push([p.turno.nome, f.nome, f.endereco, 'Endereço não localizado']));
+  });
+  const wb = XLSX.utils.book_new();
+  [['Resumo',resumo],['Ida',ida],['Volta',volta]].forEach(([n,a]) => XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(a), n));
+  if (sem.length > 1) XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sem), 'Sem rota');
+  XLSX.writeFile(wb, `rotas-${plan[0].date}.xlsx`);
+});
+
+/* ---------------- Início ---------------- */
+renderWho();
+Store.init ? Store.init() : null;
+if (useFirebase) $('#login').hidden = false;
+renderAll();
+})();
+</script>
+</body>
+</html>
