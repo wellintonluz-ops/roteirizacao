@@ -1673,6 +1673,56 @@ function insertAt(ids, f, startGeo, endGeo, dir){
 function occupants(R){ return 1 + (R.ida.ids||[]).length; }
 function capOf(R){ const v = data.veic.find(x => x.id === R.veiculoId); return +v?.capacidade || +R.cap || 0; }
 
+/* Etapa final: tenta juntar rotas usando o tempo REAL pela estrada (OSRM), trocando para um carro maior quando precisa.
+   Começa pelas rotas mais vazias. Aceita a junção se a rota resultante ficar dentro do limite de tempo
+   (ou, sem limite, se acrescentar no máximo 20 min). Motorista fixo ou escolhido à mão nunca vira carona. */
+const routeSecs = R => Math.max(R.ida.arr - R.ida.dep, R.volta.arr - R.volta.dep) / 1000;
+async function consolidate(rotas, t, limitS, onTry){
+  const co = cfg().geo;
+  const tryOnce = async () => {
+    const order = rotas.slice().sort((a,b) => occupants(a) - occupants(b));
+    for (const R of order){
+      const drvR = funcById(R.motoristaId);
+      if (!drvR || R.motoristaManual || drvR.cnh === 'fixo') continue;
+      const members = [drvR, ...R.ida.ids.map(funcById)].filter(f => f && f.geo);
+      const usedOthers = id => rotas.some(x => x !== R && x.veiculoId === id);
+      // candidatos: as rotas que passam mais perto das pessoas desta rota
+      const cands = rotas.filter(T => T !== R).map(T => {
+        const drvT = funcById(T.motoristaId); if (!drvT?.geo) return null;
+        const pts = [drvT.geo, ...T.ida.ids.map(funcById).filter(f => f && f.geo).map(f => f.geo), co];
+        const near = members.reduce((a, m) => a + Math.min(...pts.map(g => tt(m.geo, g))), 0);
+        return {T, drvT, near};
+      }).filter(Boolean).sort((a,b) => a.near - b.near).slice(0, 3);
+      let best = null;
+      for (const {T, drvT} of cands){
+        const need = occupants(T) + members.length;
+        const freeCars = vehiclesFor(t.id).filter(v => v.id === T.veiculoId || v.id === R.veiculoId || !rotas.some(x => x.veiculoId === v.id));
+        const car = freeCars.filter(v => +v.capacidade >= need).sort((a,b) => a.capacidade - b.capacidade)[0];
+        if (!car) continue;
+        let ids = T.ida.ids.slice();
+        for (const m of members.slice().sort((a,b) => tt(b.geo, co) - tt(a.geo, co))) ids = insertAt(ids, m, drvT.geo, co, 'ida');
+        const st = {start:drvT.geo, end:co, stops:ids.map(funcById), dir:'ida'}; twoOpt(st);
+        const Tn = {...T, veiculoId:car.id, cap:+car.capacidade, ida:{ids:st.stops.map(f => f.id)},
+          volta:{ids:bestOrder(co, drvT.geo, st.stops.slice().reverse(), 'volta').map(f => f.id)}};
+        onTry && onTry(`Testando juntar ${drvR.nome.split(' ')[0]} na rota de ${drvT.nome.split(' ')[0]}…`);
+        try{ await timeR(Tn, t); }catch{ continue; }
+        const dur = routeSecs(Tn), added = dur - routeSecs(T);
+        const ok = limitS > 0 ? dur <= limitS + 60 : added <= 20*60;
+        if (ok && (!best || added < best.added)) best = {T, Tn, added};
+      }
+      if (best){
+        Object.assign(best.T, best.Tn);
+        rotas.splice(rotas.indexOf(R), 1);
+        return true;
+      }
+    }
+    return false;
+  };
+  let merged = 0;
+  for (let i = 0; i < 6; i++){ if (await tryOnce()) merged++; else break; }
+  return merged;
+}
+
 /* Montagem completa de um turno */
 async function buildPlan(t, step, forcedIds){
   const c = cfg(), company = c.geo, limitS = (+c.maxRota||0)*60;
@@ -1698,6 +1748,11 @@ async function buildPlan(t, step, forcedIds){
     scale = newScale; setStatus(`Ajustando para o limite de ${fmtDur(limitS)} em ${t.nome}…`);
   }
   rotas.forEach(R => { delete R._est; });
+  if ($('#rFewer').checked && rotas.length > 1){
+    const n = await consolidate(rotas, t, limitS, msg => setStatus(msg));
+    if (n) setStatus(`${n} rota${n>1?'s':''} juntada${n>1?'s':''} a outra${n>1?'s':''} em ${t.nome}.`);
+    rotas.forEach((R, i) => { R.cor = ROUTE_COLORS[i % ROUTE_COLORS.length]; });
+  }
   const P = {id:t.id, turnoId:t.id, geradoEm:Date.now(), geradoPor:user?.email || '', editadoEm:null, editadoPor:'', reason:pl.reason || '', limiteMin:+c.maxRota||0, rotas};
   await Store.put('plano', P);
 }
@@ -1845,6 +1900,22 @@ const Edit = {
       return [key];
     });
   },
+  async merge(turnoId){
+    if (busy) return;
+    const P0 = planOf(turnoId), t = turnoById(turnoId); if (!P0 || !t) return;
+    const P = JSON.parse(JSON.stringify(P0));
+    busy = true;
+    try{
+      setStatus('Calculando tempos reais…'); await ensureMatrix(turnoPoints(turnoId)); setPlanCtx(t, 1);
+      const n = await consolidate(P.rotas, t, (+cfg().maxRota||0)*60, msg => setStatus(msg));
+      if (!n){ setStatus('Nenhuma rota pôde ser juntada sem passar do limite de tempo ou da capacidade dos carros livres.'); busy = false; return; }
+      P.rotas.forEach((R, i) => { R.cor = ROUTE_COLORS[i % ROUTE_COLORS.length]; R.manual = true; });
+      P.editadoEm = Date.now(); P.editadoPor = user?.email || '';
+      await Store.put('plano', P);
+      setStatus(`${n} rota${n>1?'s':''} juntada${n>1?'s':''} — salvo.`);
+    }catch(e){ console.error(e); setStatus(e.message || String(e), true); }
+    busy = false; refreshPlan();
+  },
   deleteRoute(turnoId, key){
     const P = planOf(turnoId), R = P?.rotas.find(r => r.key === key); if (!R) return;
     if (!confirm(`Excluir esta rota? O motorista e os ${R.ida.ids.length} passageiros ficam na lista "Sem rota".`)) return;
@@ -1955,6 +2026,7 @@ function renderResults(){
     return `<div class="turno-res" data-turno="${t.id}">
       <div class="turno-head ${pi===viewTurno?'sel':''}" data-t="${pi}"><h4>${esc(t.nome)} <span class="hint">${t.entrada}–${t.saida}</span></h4><span class="hint">${p.routes.length} carro${p.routes.length!==1?'s':''} · ${pax} pessoas · ${fmtKm(kmTot)}</span></div>
       <p class="hint">${meta}</p>
+      ${p.routes.length > 1 ? `<div class="btn-row"><button class="btn small" data-act="merge" type="button" title="Testa, com o tempo real pela estrada, colocar o motorista e os passageiros das rotas mais vazias em outros carros">Juntar rotas vazias</button></div>` : ''}
       ${reason}${overNote}${pool}${skipped}
       ${cards}
     </div>`;
@@ -1979,6 +2051,7 @@ function renderResults(){
       if (a === 'up' || a === 'down') Edit.reorder(T, k, viewDir, +n.dataset.i, a === 'up' ? -1 : 1);
       else if (a === 'driver') Edit.setDriver(T, k, fid);
       else if (a === 'recalc') Edit.recalcRoute(T, k);
+      else if (a === 'merge') Edit.merge(T);
       else if (a === 'edit'){ editKey = k; renderResults(); }
       else if (a === 'done'){ editKey = null; renderResults(); }
       else if (a === 'fill') Edit.fill(T, k);
