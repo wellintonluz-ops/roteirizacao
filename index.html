@@ -1413,6 +1413,43 @@ function refreshPlan(){
    Custo = 1,6 × km da rota + 0,6 × km que cada passageiro passa a bordo.
    Distâncias estimadas (linha reta × 1,35); os horários finais vêm do OSRM + estimativa de trânsito. */
 const W = 0.6;
+/* Matriz de tempos reais pela estrada (OSRM /table) entre empresa e funcionários do turno.
+   Sem ela (servidor fora do ar), usa linha reta × 1,35 a 40 km/h. */
+const MATRIX = {key:'', idx:new Map(), dur:null, n:0, ok:false};
+let matrixIdx = new WeakMap();
+const gk = g => g.lat.toFixed(5) + ',' + g.lon.toFixed(5);
+async function ensureMatrix(points){
+  const uniq = [...new Map(points.filter(g => g && Number.isFinite(g.lat)).map(g => [gk(g), g])).values()];
+  const key = uniq.map(gk).sort().join('|');
+  if (MATRIX.key === key && MATRIX.ok) return true;
+  const n = uniq.length, dur = new Float64Array(n*n).fill(NaN), CH = 40;
+  try{
+    for (let a = 0; a < n; a += CH) for (let b = 0; b < n; b += CH){
+      const A = uniq.slice(a, a+CH), B = uniq.slice(b, b+CH), pts = [...A, ...B];
+      const q = `${pts.map(g => `${g.lon.toFixed(6)},${g.lat.toFixed(6)}`).join(';')}?sources=${A.map((_,i)=>i).join(';')}&destinations=${B.map((_,i)=>A.length+i).join(';')}&annotations=duration`;
+      let j = null, err;
+      for (const base of OSRM){ try{ j = await fetchJSON(`${base}/table/v1/driving/${q}`); if (j.code === 'Ok') break; j = null; }catch(e){ err = e; } }
+      if (!j) throw err || new Error('Matriz indisponível');
+      j.durations.forEach((row, i) => row.forEach((v, k) => { dur[(a+i)*n + (b+k)] = v == null ? NaN : v; }));
+      await sleep(350);
+    }
+    Object.assign(MATRIX, {key, idx:new Map(uniq.map((g,i) => [gk(g), i])), dur, n, ok:true});
+  }catch(e){
+    console.warn('Matriz de tempos indisponível, usando estimativa em linha reta.', e);
+    Object.assign(MATRIX, {key:'', idx:new Map(), dur:null, n:0, ok:false});
+  }
+  matrixIdx = new WeakMap();
+  return MATRIX.ok;
+}
+function mIdx(g){ let v = matrixIdx.get(g); if (v === undefined){ v = MATRIX.idx.get(gk(g)); if (v === undefined) v = -1; matrixIdx.set(g, v); } return v; }
+/* tempo de viagem em segundos (sem trânsito) de a para b */
+function tt(a, b){
+  if (a === b) return 0;
+  if (MATRIX.ok){ const i = mIdx(a), j = mIdx(b); if (i >= 0 && j >= 0){ const v = MATRIX.dur[i*MATRIX.n + j]; if (Number.isFinite(v)) return v; } }
+  return km(a, b) / 40 * 3600;
+}
+function turnoPoints(turnoId){ return [cfg().geo, ...data.func.filter(f => f.ativo !== false && f.turnoId === turnoId && f.geo).map(f => f.geo)]; }
+
 /* Contexto do limite de tempo durante a montagem (estimativa por distância, calibrada pelo OSRM) */
 const PLAN_CTX = {limitS:0, scale:1, pct:0, dwell:0};
 const EST_SPEED = 40; // km/h sobre a distância estimada (linha reta × 1,35)
@@ -1423,14 +1460,14 @@ function setPlanCtx(t, scale){
 }
 function estDur(r, scale){
   const pts = [r.start, ...r.stops.map(s=>s.geo), r.end];
-  let d = 0; for (let i = 0; i < pts.length-1; i++) d += km(pts[i], pts[i+1]);
-  return d/EST_SPEED*3600*(1 + PLAN_CTX.pct/100)*(scale ?? PLAN_CTX.scale) + PLAN_CTX.dwell*r.stops.length;
+  let d = 0; for (let i = 0; i < pts.length-1; i++) d += tt(pts[i], pts[i+1]);
+  return d*(1 + PLAN_CTX.pct/100)*(scale ?? PLAN_CTX.scale) + PLAN_CTX.dwell*r.stops.length;
 }
 const overLimit = r => PLAN_CTX.limitS > 0 && r.dir !== 'volta' && estDur(r) > PLAN_CTX.limitS;
 function routeCost(r){
   const n = r.stops.length;
   const pts = [r.start, ...r.stops.map(s=>s.geo), r.end];
-  const seg = []; for (let i = 0; i < pts.length-1; i++) seg.push(km(pts[i], pts[i+1]));
+  const seg = []; for (let i = 0; i < pts.length-1; i++) seg.push(tt(pts[i], pts[i+1])/60);
   const path = seg.reduce((a,b)=>a+b,0);
   let onboard = 0, acc = 0;
   if (r.dir === 'volta'){ for (let i = 0; i < n; i++){ acc += seg[i]; onboard += acc; } }
@@ -1461,17 +1498,24 @@ function bestInsert(r, e){
   }
   return best;
 }
-function improve(routes){
+function improve(routes, opts = {}){
   for (let iter = 0; iter < 40; iter++){
     let improved = false;
     routes.forEach(r => { if (twoOpt(r)) improved = true; r.cost = routeCost(r); });
-    // mover um passageiro para outro carro
+    // mover um passageiro para outra posição no mesmo carro ou para outro carro
     for (const ra of routes) for (let i = 0; i < ra.stops.length; i++){
       const e = ra.stops[i]; ra.stops.splice(i, 1);
-      const gain = ra.cost - routeCost(ra);
+      const without = routeCost(ra), gain = ra.cost - without;
       let best = null, br = null;
+      // mesmo carro, outra posição
+      for (let pz = 0; pz <= ra.stops.length; pz++){
+        if (pz === i) continue;
+        ra.stops.splice(pz, 0, e); const c = routeCost(ra); ra.stops.splice(pz, 1);
+        const delta = c - without;
+        if (delta < gain - 0.05 && (!best || delta < best.delta)){ best = {delta, pos:pz}; br = ra; }
+      }
       routes.forEach(rb => { if (rb === ra) return; const ins = bestInsert(rb, e); if (ins && ins.delta < gain - 0.05 && (!best || ins.delta < best.delta)){ best = ins; br = rb; } });
-      if (br){ br.stops.splice(best.pos, 0, e); br.cost = routeCost(br); ra.cost = routeCost(ra); improved = true; i--; }
+      if (br){ br.stops.splice(best.pos, 0, e); br.cost = routeCost(br); if (br !== ra) ra.cost = routeCost(ra); else ra.cost = routeCost(ra); improved = true; if (br !== ra) i--; }
       else ra.stops.splice(i, 0, e);
     }
     // trocar dois passageiros de carro
@@ -1496,6 +1540,29 @@ function improve(routes){
         if (c < r.cost - 0.05 && (!best || c < best.c)) best = {c, p, stops:cand.stops};
       });
       if (best){ r.driver = best.p; r.start = best.p.geo; r.stops = best.stops; r.cost = best.c; improved = true; }
+    }
+    // desfazer uma rota: motorista e passageiros dela cabem nos outros carros com custo menor
+    if (opts.eliminate && routes.length > 1){
+      const order = routes.slice().sort((a,b) => a.stops.length - b.stops.length);
+      for (const R of order){
+        if (R.driver.cnh === 'fixo' || R.driverLocked || R.carLocked || !routes.includes(R)) continue;
+        const others = routes.filter(x => x !== R);
+        const spare = others.reduce((a,x) => a + Math.max(0, x.cap - x.stops.length), 0);
+        const members = [R.driver, ...R.stops];
+        if (spare < members.length) continue;
+        const snap = others.map(x => ({x, stops:x.stops.slice(), cost:x.cost}));
+        let ok = true;
+        for (const e of members.slice().sort((a,b) => tt(b.geo, R.end) - tt(a.geo, R.end))){
+          let bi = null, bx = null;
+          others.forEach(x => { const ins = bestInsert(x, e); if (ins && (!bi || ins.delta < bi.delta)){ bi = ins; bx = x; } });
+          if (!bx){ ok = false; break; }
+          bx.stops.splice(bi.pos, 0, e); bx.cost = routeCost(bx);
+        }
+        if (ok){ others.forEach(x => { twoOpt(x); x.cost = routeCost(x); }); }
+        const before = snap.reduce((a,o) => a + o.cost, 0) + R.cost, after = others.reduce((a,x) => a + x.cost, 0);
+        if (ok && after < before - 0.05){ routes.splice(routes.indexOf(R), 1); improved = true; }
+        else snap.forEach(o => { o.x.stops = o.stops; o.x.cost = o.cost; });
+      }
     }
     if (!improved) break;
   }
@@ -1522,9 +1589,9 @@ function planShift(emps, vehs, company, fewer, forced){
   const topCap = k => cars.slice(0,k).reduce((a,v)=>a+(+v.capacidade||0),0);
   let k = forcedList.length ? Math.min(forcedList.length, maxK) : (fewer ? Math.max(1, Math.min(fixed.length, maxK)) : maxK);
   if (fewer && !forcedList.length) while (k < maxK && topCap(k) < N) k++;
-  let best = null;
+  let best = null, overall = null;
   while (true){
-    for (let s = 0; s < (forcedList.length && k <= forcedList.length ? 1 : 8); s++){
+    for (let s = 0; s < (forcedList.length && k <= forcedList.length ? 1 : 10); s++){
       const rand = rng(1000 + s*7919);
       const drivers = [], carsLeft = cars.slice();
       fixed.slice(0, k).forEach(f => {
@@ -1547,13 +1614,16 @@ function planShift(emps, vehs, company, fewer, forced){
         routes.forEach(r => { const b = bestInsert(r, e); if (b && (!bi || b.delta < bi.delta)){ bi = b; br = r; } });
         if (br){ br.stops.splice(bi.pos, 0, e); br.cost = routeCost(br); } else unassigned.push(e);
       });
-      improve(routes);
+      improve(routes, {eliminate: !!fewer || !!forcedList.length});
       const total = routes.reduce((a,r)=>a+r.cost,0) + 1000*unassigned.length;
       if (!best || total < best.total) best = {routes, unassigned, total, k, over: routes.filter(overLimit).length};
     }
+    // guarda a melhor solução entre os números de carros testados
+    if (!overall || best.total < overall.total) overall = best;
     if (k < maxK && ((!forcedList.length && best.unassigned.length) || best.over)){ k++; best = null; continue; }
     break;
   }
+  best = overall;
   fitCars(best.routes, cars);
   return best;
 }
@@ -1605,6 +1675,9 @@ async function buildPlan(t, step, forcedIds){
   const emps = data.func.filter(f => f.ativo !== false && f.turnoId === t.id && f.geo);
   const forced = (forcedIds || []).map(funcById).filter(f => f && f.geo && emps.includes(f));
   let scale = 1, rotas = [], pl = null;
+  setStatus(`Calculando tempos reais entre os endereços de ${t.nome}…`);
+  await ensureMatrix([company, ...emps.map(f => f.geo)]);
+  setStatus(`Montando ${t.nome}…`);
   for (let attempt = 0; attempt < 3; attempt++){
     setPlanCtx(t, scale);
     pl = emps.length ? planShift(emps, vehiclesFor(t.id), company, $('#rFewer').checked, forced) : {routes:[], unassigned:[], reason:'Nenhum funcionário localizado neste turno.'};
@@ -1661,6 +1734,7 @@ async function editPlan(turnoId, label, mutate){
   const P0 = planOf(turnoId), t = turnoById(turnoId); if (!P0 || !t) return;
   const P = JSON.parse(JSON.stringify(P0));
   let touched;
+  if (!MATRIX.ok || !turnoPoints(turnoId).every(g => mIdx(g) >= 0)){ setStatus('Calculando tempos reais…'); await ensureMatrix(turnoPoints(turnoId)); }
   try{ touched = mutate(P); }catch(e){ toast(e.message, 5000); return; }
   if (touched === false) return;
   busy = true; setStatus(label + '…');
@@ -1746,7 +1820,7 @@ const Edit = {
         let best = null;
         for (const pz of pool){
           if (r.stops.includes(pz)) continue;
-          const alone = (1+W) * km(pz.geo, co);
+          const alone = (1+W) * tt(pz.geo, co)/60;
           for (let i = 0; i <= r.stops.length; i++){
             r.stops.splice(i, 0, pz); const delta = routeCost(r) - r.cost; r.stops.splice(i, 1);
             const ratio = delta / Math.max(alone, 0.5);
