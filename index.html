@@ -1677,58 +1677,67 @@ function capOf(R){ const v = data.veic.find(x => x.id === R.veiculoId); return +
    Começa pelas rotas mais vazias. Aceita a junção se a rota resultante ficar dentro do limite de tempo
    (ou, sem limite, se acrescentar no máximo 20 min). Motorista fixo ou escolhido à mão nunca vira carona. */
 const routeSecs = R => Math.max(R.ida.arr - R.ida.dep, R.volta.arr - R.volta.dep) / 1000;
-async function consolidate(rotas, t, limitS, onTry){
-  const co = cfg().geo;
+/* Rota "quase vazia": só o motorista ou motorista + 1, quando há outras rotas no turno */
+const LOW_OCC = 2;
+async function consolidate(rotas, t, limitS, onTry, opts = {}){
+  const co = cfg().geo, force = !!opts.force;
+  let notes = [], merges = [];
+  const first = s => String(s||'').split(' ')[0];
   const tryOnce = async () => {
     const order = rotas.slice().sort((a,b) => occupants(a) - occupants(b));
     for (const R of order){
       const drvR = funcById(R.motoristaId);
-      if (!drvR || R.motoristaManual || drvR.cnh === 'fixo') continue;
+      if (!drvR || drvR.cnh === 'fixo') continue;
+      if (!force && R.motoristaManual) continue;
       const members = [drvR, ...R.ida.ids.map(funcById)].filter(f => f && f.geo);
-      const usedOthers = id => rotas.some(x => x !== R && x.veiculoId === id);
-      // candidatos: as rotas que passam mais perto das pessoas desta rota
       const cands = rotas.filter(T => T !== R).map(T => {
         const drvT = funcById(T.motoristaId); if (!drvT?.geo) return null;
         const pts = [drvT.geo, ...T.ida.ids.map(funcById).filter(f => f && f.geo).map(f => f.geo), co];
         const near = members.reduce((a, m) => a + Math.min(...pts.map(g => tt(m.geo, g))), 0);
         return {T, drvT, near};
-      }).filter(Boolean).sort((a,b) => a.near - b.near).slice(0, 3);
+      }).filter(Boolean).sort((a,b) => a.near - b.near).slice(0, force ? 5 : 3);
       let best = null;
       for (const {T, drvT} of cands){
         const need = occupants(T) + members.length;
         const freeCars = vehiclesFor(t.id).filter(v => v.id === T.veiculoId || v.id === R.veiculoId || !rotas.some(x => x.veiculoId === v.id));
         const car = freeCars.filter(v => +v.capacidade >= need).sort((a,b) => a.capacidade - b.capacidade)[0];
-        if (!car) continue;
+        if (!car){ notes.push({occ:occupants(R), txt:`${first(drvR.nome)} → rota de ${first(drvT.nome)}: não há carro livre com ${need} lugares`}); continue; }
         let ids = T.ida.ids.slice();
         for (const m of members.slice().sort((a,b) => tt(b.geo, co) - tt(a.geo, co))) ids = insertAt(ids, m, drvT.geo, co, 'ida');
         const st = {start:drvT.geo, end:co, stops:ids.map(funcById), dir:'ida'}; twoOpt(st);
         const Tn = {...T, veiculoId:car.id, cap:+car.capacidade, ida:{ids:st.stops.map(f => f.id)},
           volta:{ids:bestOrder(co, drvT.geo, st.stops.slice().reverse(), 'volta').map(f => f.id)}};
-        onTry && onTry(`Testando juntar ${drvR.nome.split(' ')[0]} na rota de ${drvT.nome.split(' ')[0]}…`);
+        onTry && onTry(`Testando juntar ${first(drvR.nome)} na rota de ${first(drvT.nome)}…`);
         try{ await timeR(Tn, t); }catch{ continue; }
         const dur = routeSecs(Tn), added = dur - routeSecs(T);
-        const ok = limitS > 0 ? dur <= limitS + 60 : added <= 20*60;
-        if (ok && (!best || added < best.added)) best = {T, Tn, added};
+        const ok = force || (limitS > 0 ? dur <= limitS + 60 : added <= 20*60);
+        if (!ok) notes.push({occ:occupants(R), txt:`${first(drvR.nome)} → rota de ${first(drvT.nome)}: ficaria com ${fmtDur(dur)}${limitS > 0 ? ` (limite ${fmtDur(limitS)})` : ` (+${fmtDur(added)})`}`});
+        if (ok && (!best || added < best.added)) best = {T, Tn, added, dur, drvT, car};
       }
       if (best){
         Object.assign(best.T, best.Tn);
         rotas.splice(rotas.indexOf(R), 1);
+        merges.push(`${first(drvR.nome)}${members.length > 1 ? ` e ${members.length-1} passageiro${members.length>2?'s':''}` : ''} → rota de ${first(best.drvT.nome)} (${best.car.nome}, ${fmtDur(best.dur)}${limitS > 0 && best.dur > limitS + 60 ? ', acima do limite' : ''})`);
         return true;
       }
+      if (force) return false;   // no modo forçado, só a rota mais vazia
     }
     return false;
   };
   let merged = 0;
-  for (let i = 0; i < 6; i++){ if (await tryOnce()) merged++; else break; }
+  for (let i = 0; i < (force ? 1 : 6); i++){ notes = []; if (await tryOnce()) merged++; else break; }
+  consolidate.notes = notes;
+  consolidate.merges = merges;
   return merged;
 }
 
+let mergeNotes = [];
 /* Montagem completa de um turno */
 async function buildPlan(t, step, forcedIds){
   const c = cfg(), company = c.geo, limitS = (+c.maxRota||0)*60;
   const emps = data.func.filter(f => f.ativo !== false && f.turnoId === t.id && f.geo);
   const forced = (forcedIds || []).map(funcById).filter(f => f && f.geo && emps.includes(f));
-  let scale = 1, rotas = [], pl = null;
+  let scale = 1, rotas = [], pl = null, avisos = [];
   setStatus(`Calculando tempos reais entre os endereços de ${t.nome}…`);
   await ensureMatrix([company, ...emps.map(f => f.geo)]);
   setStatus(`Montando ${t.nome}…`);
@@ -1751,9 +1760,11 @@ async function buildPlan(t, step, forcedIds){
   if ($('#rFewer').checked && rotas.length > 1){
     const n = await consolidate(rotas, t, limitS, msg => setStatus(msg));
     if (n) setStatus(`${n} rota${n>1?'s':''} juntada${n>1?'s':''} a outra${n>1?'s':''} em ${t.nome}.`);
+    avisos = (consolidate.notes || []).filter(x => x.occ <= LOW_OCC).map(x => x.txt).slice(0, 4);
+    if (avisos.length) mergeNotes.push(t.nome);
     rotas.forEach((R, i) => { R.cor = ROUTE_COLORS[i % ROUTE_COLORS.length]; });
   }
-  const P = {id:t.id, turnoId:t.id, geradoEm:Date.now(), geradoPor:user?.email || '', editadoEm:null, editadoPor:'', reason:pl.reason || '', limiteMin:+c.maxRota||0, rotas};
+  const P = {id:t.id, turnoId:t.id, geradoEm:Date.now(), geradoPor:user?.email || '', editadoEm:null, editadoPor:'', reason:pl.reason || '', limiteMin:+c.maxRota||0, avisos, rotas};
   await Store.put('plano', P);
 }
 $('#runBtn').addEventListener('click', async () => {
@@ -1775,12 +1786,13 @@ $('#runBtn').addEventListener('click', async () => {
   await runBuild(ts, forcedIds);
 });
 async function runBuild(ts, forcedIds){
-  busy = true; $('#runBtn').disabled = true; focusKey = null; viewTurno = 0;
+  busy = true; $('#runBtn').disabled = true; focusKey = null; viewTurno = 0; mergeNotes = [];
   let total = 0; ts.forEach(t => { const es = data.func.filter(f=>f.ativo!==false&&f.turnoId===t.id&&f.geo); total += Math.max(1, Math.min(vehiclesFor(t.id).length, es.filter(canDrive).length)); });
   let done = 0; const step = () => { done++; $('#bar').style.width = Math.min(100, done/total*100) + '%'; };
   try{
     for (const t of ts){ setStatus(`Montando ${t.nome}…`); await sleep(20); await buildPlan(t, step, forcedIds); }
-    setStatus('Rotas salvas. Elas ficam fixas até alguém recalcular ou ajustar.');
+    if (mergeNotes.length) setStatus(`Rotas salvas, mas há rota quase vazia em ${mergeNotes.join(', ')}: veja o aviso vermelho no turno.`, true);
+    else setStatus('Rotas salvas. Elas ficam fixas até alguém recalcular ou ajustar.');
   }catch(e){ console.error(e); setStatus(e.message || String(e), true); }
   busy = false; $('#runBtn').disabled = false; setTimeout(()=>{ $('#bar').style.width = '0'; }, 800);
   lastFit = ''; refreshPlan();
@@ -1807,8 +1819,14 @@ async function editPlan(turnoId, label, mutate){
 }
 const findR = (P, key) => { const R = P.rotas.find(r => r.key === key); if (!R) throw new Error('Rota não encontrada.'); return R; };
 function removeFrom(R, fid){ R.ida.ids = R.ida.ids.filter(x => x !== fid); R.volta.ids = R.volta.ids.filter(x => x !== fid); }
-function addTo(R, f){
-  if (occupants(R) >= capOf(R)) throw new Error('Este carro já está lotado. Troque o carro ou tire alguém antes.');
+function addTo(R, f, P, turnoId){
+  if (occupants(R) >= capOf(R)){
+    const used = new Set((P?.rotas || []).filter(x => x !== R).map(x => x.veiculoId));
+    const big = vehiclesFor(turnoId).filter(v => !used.has(v.id) && +v.capacidade > occupants(R)).sort((a,b) => a.capacidade - b.capacidade)[0];
+    if (!big) throw new Error('Este carro já está lotado e não há carro maior livre neste turno.');
+    R.veiculoId = big.id; R.cap = +big.capacidade;
+    toast(`Carro trocado para ${big.nome} (${big.capacidade} lugares) para caber mais uma pessoa.`, 5000);
+  }
   if (!f.geo) throw new Error(`${f.nome} não tem endereço localizado.`);
   const drv = funcById(R.motoristaId), co = cfg().geo;
   R.ida.ids = insertAt(R.ida.ids, f, drv.geo, co, 'ida');
@@ -1820,7 +1838,7 @@ const Edit = {
     editPlan(turnoId, toKey === 'none' ? `Retirando ${f?.nome||''} da rota` : `Movendo ${f?.nome||''}`, P => {
       const touched = [];
       if (fromKey){ const A = findR(P, fromKey); removeFrom(A, fid); A.manual = true; touched.push(A.key); }
-      if (toKey && toKey !== 'none'){ const B = findR(P, toKey); addTo(B, f); B.manual = true; touched.push(B.key); }
+      if (toKey && toKey !== 'none'){ const B = findR(P, toKey); addTo(B, f, P, turnoId); B.manual = true; touched.push(B.key); }
       return touched;
     });
   },
@@ -1907,12 +1925,20 @@ const Edit = {
     busy = true;
     try{
       setStatus('Calculando tempos reais…'); await ensureMatrix(turnoPoints(turnoId)); setPlanCtx(t, 1);
-      const n = await consolidate(P.rotas, t, (+cfg().maxRota||0)*60, msg => setStatus(msg));
-      if (!n){ setStatus('Nenhuma rota pôde ser juntada sem passar do limite de tempo ou da capacidade dos carros livres.'); busy = false; return; }
-      P.rotas.forEach((R, i) => { R.cor = ROUTE_COLORS[i % ROUTE_COLORS.length]; R.manual = true; });
+      const n = await consolidate(P.rotas, t, (+cfg().maxRota||0)*60, msg => setStatus(msg), {force:true});
+      if (!n){
+        const why = (consolidate.notes || []).map(x => x.txt).join(' · ');
+        setStatus('Não foi possível juntar a rota mais vazia. ' + (why || 'Não há outra rota no turno.'), true);
+        toast('Não foi possível juntar: ' + (why || 'não há outra rota no turno.'), 8000);
+        busy = false; return;
+      }
+      P.rotas.forEach((R, i) => { R.cor = ROUTE_COLORS[i % ROUTE_COLORS.length]; });
+      P.rotas.forEach(R => { R.manual = true; });
+      P.avisos = [];
       P.editadoEm = Date.now(); P.editadoPor = user?.email || '';
       await Store.put('plano', P);
-      setStatus(`${n} rota${n>1?'s':''} juntada${n>1?'s':''} — salvo.`);
+      setStatus('Rota juntada — ' + consolidate.merges.join(' · ') + '. Salvo.');
+      toast('Rota juntada: ' + consolidate.merges.join(' · '), 7000);
     }catch(e){ console.error(e); setStatus(e.message || String(e), true); }
     busy = false; refreshPlan();
   },
@@ -2020,13 +2046,17 @@ function renderResults(){
         <button class="btn small" data-act="newroute" data-f="${f.id}" type="button" title="${canDrive(f)?'Tem CNH':'Confirme a CNH antes'}">Nova rota dirigindo</button></span></li>`).join('')}</ul></div>` : '';
     const skipped = p.skipped.length ? `<div class="notice err"><b>${p.skipped.length} sem localização</b>: ${p.skipped.map(f=>esc(f.nome)).join(', ')}</div>` : '';
     const reason = (!p.routes.length && p.P.reason) ? `<div class="notice err"><b>${esc(p.P.reason)}</b></div>` : '';
+    const lowRoutes = p.routes.length > 1 ? p.routes.filter(r => r.ida.stops.length + 1 <= LOW_OCC) : [];
+    const avisos = (p.P.avisos || []);
+    const lowNote = lowRoutes.length ? `<div class="notice err"><b>${lowRoutes.length === 1 ? 'Rota quase vazia' : lowRoutes.length + ' rotas quase vazias'}:</b> ${lowRoutes.map(r => `${esc(r.driver.nome)} (${r.ida.stops.length+1} pessoa${r.ida.stops.length ? 's' : ''} no ${esc(r.v.nome)})`).join(', ')}.${avisos.length ? `<br>Junção automática recusada: ${avisos.map(esc).join(' · ')}.` : ''}<br>Clique em <b>Juntar a rota mais vazia</b> para encaixar mesmo assim${limitS ? ' (pode passar do tempo máximo)' : ''}.</div>` : '';
     const nOver = p.routes.filter(isOver).length;
     const overNote = nOver ? `<div class="notice"><b>${nOver} rota${nOver>1?'s':''} acima de ${fmtDur(limitS)}.</b> ${vehiclesFor(t.id).length <= p.routes.length ? 'Não há carro livre para abrir outra rota.' : 'Não há outro funcionário com CNH (fora dos motoristas atuais) para abrir outra rota. Marque quem tem CNH ou use "Nova rota dirigindo" e depois "Encaixar passageiros".'}</div>` : '';
     const meta = `Gerado em ${fmtDT(p.P.geradoEm)}${p.P.geradoPor?' por '+esc(p.P.geradoPor.split('@')[0]):''}${p.P.editadoEm?` · ajustado em ${fmtDT(p.P.editadoEm)}${p.P.editadoPor?' por '+esc(p.P.editadoPor.split('@')[0]):''}`:''}`;
     return `<div class="turno-res" data-turno="${t.id}">
       <div class="turno-head ${pi===viewTurno?'sel':''}" data-t="${pi}"><h4>${esc(t.nome)} <span class="hint">${t.entrada}–${t.saida}</span></h4><span class="hint">${p.routes.length} carro${p.routes.length!==1?'s':''} · ${pax} pessoas · ${fmtKm(kmTot)}</span></div>
       <p class="hint">${meta}</p>
-      ${p.routes.length > 1 ? `<div class="btn-row"><button class="btn small" data-act="merge" type="button" title="Testa, com o tempo real pela estrada, colocar o motorista e os passageiros das rotas mais vazias em outros carros">Juntar rotas vazias</button></div>` : ''}
+      ${lowNote}
+      ${p.routes.length > 1 ? `<div class="btn-row"><button class="btn small ${lowRoutes.length ? 'accent' : ''}" data-act="merge" type="button" title="Junta o motorista e os passageiros da rota mais vazia na rota em que acrescentam menos tempo, trocando para um carro maior se precisar — mesmo que passe do tempo máximo">Juntar a rota mais vazia</button></div>` : ''}
       ${reason}${overNote}${pool}${skipped}
       ${cards}
     </div>`;
