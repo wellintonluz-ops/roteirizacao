@@ -1451,7 +1451,10 @@ function tt(a, b){
 function turnoPoints(turnoId){ return [cfg().geo, ...data.func.filter(f => f.ativo !== false && f.turnoId === turnoId && f.geo).map(f => f.geo)]; }
 
 /* Contexto do limite de tempo durante a montagem (estimativa por distância, calibrada pelo OSRM) */
-const PLAN_CTX = {limitS:0, scale:1, pct:0, dwell:0};
+/* fixed = custo de colocar mais um carro na rua (combustível, motorista, desgaste), em minutos-equivalentes.
+   Com "menor número de carros" marcado, juntar pessoas num carro compensa mais que abrir outro. */
+const VEHICLE_COST = 35;
+const PLAN_CTX = {limitS:0, scale:1, pct:0, dwell:0, fixed:0};
 const EST_SPEED = 40; // km/h sobre a distância estimada (linha reta × 1,35)
 function setPlanCtx(t, scale){
   const c = cfg();
@@ -1473,7 +1476,7 @@ function routeCost(r){
   if (r.dir === 'volta'){ for (let i = 0; i < n; i++){ acc += seg[i]; onboard += acc; } }
   else { for (let i = n; i >= 1; i--){ acc += seg[i]; onboard += acc; } }
   let cost = (1+W)*path + W*onboard;
-  if (PLAN_CTX.limitS > 0 && r.dir !== 'volta'){ const over = estDur(r) - PLAN_CTX.limitS; if (over > 0) cost += over/60*5; }
+  if (PLAN_CTX.limitS > 0 && r.dir !== 'volta'){ const over = estDur(r) - PLAN_CTX.limitS; if (over > 0) cost += over/60*8; }
   return cost;
 }
 function twoOpt(r){
@@ -1559,7 +1562,7 @@ function improve(routes, opts = {}){
           bx.stops.splice(bi.pos, 0, e); bx.cost = routeCost(bx);
         }
         if (ok){ others.forEach(x => { twoOpt(x); x.cost = routeCost(x); }); }
-        const before = snap.reduce((a,o) => a + o.cost, 0) + R.cost, after = others.reduce((a,x) => a + x.cost, 0);
+        const before = snap.reduce((a,o) => a + o.cost, 0) + R.cost + PLAN_CTX.fixed, after = others.reduce((a,x) => a + x.cost, 0);
         if (ok && after < before - 0.05){ routes.splice(routes.indexOf(R), 1); improved = true; }
         else snap.forEach(o => { o.x.stops = o.stops; o.x.cost = o.cost; });
       }
@@ -1579,6 +1582,7 @@ function fitCars(routes, cars){
 }
 function planShift(emps, vehs, company, fewer, forced){
   const N = emps.length;
+  PLAN_CTX.fixed = fewer ? VEHICLE_COST : 0;
   const cars = vehs.slice().sort((a,b) => (+b.capacidade||0) - (+a.capacidade||0));
   if (!cars.length) return {routes:[], unassigned:emps.slice(), reason:'Nenhum carro disponível neste turno.'};
   const forcedList = (forced || []).filter(f => f && f.geo);
@@ -1615,7 +1619,7 @@ function planShift(emps, vehs, company, fewer, forced){
         if (br){ br.stops.splice(bi.pos, 0, e); br.cost = routeCost(br); } else unassigned.push(e);
       });
       improve(routes, {eliminate: !!fewer || !!forcedList.length});
-      const total = routes.reduce((a,r)=>a+r.cost,0) + 1000*unassigned.length;
+      const total = routes.reduce((a,r)=>a+r.cost,0) + PLAN_CTX.fixed*routes.length + 1000*unassigned.length;
       if (!best || total < best.total) best = {routes, unassigned, total, k, over: routes.filter(overLimit).length};
     }
     // guarda a melhor solução entre os números de carros testados
