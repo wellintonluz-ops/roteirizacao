@@ -290,6 +290,36 @@ dialog::backdrop{background:rgb(10 20 15 / .5);backdrop-filter:blur(2px)}
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .brand-logo img,:root:not([data-theme="light"]) .logo-prev{background:#fff;border-radius:6px;padding:3px 6px}}
 :root[data-theme="dark"] .brand-logo img,:root[data-theme="dark"] .logo-prev{background:#fff;border-radius:6px;padding:3px 6px}
 .stack{display:grid;grid-template-columns:1fr;gap:10px}
+/* ---------- Página do motorista ---------- */
+.drv{min-height:100%;background:var(--bg)}
+.drv-wrap{max-width:560px;margin:0 auto;padding-block:12px 40px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));display:flex;flex-direction:column;gap:14px}
+.drv-top{display:flex;justify-content:space-between;align-items:center;padding-bottom:10px;border-bottom:1px solid var(--line)}
+.drv-head h1{margin:0;font:700 26px/1.1 var(--font-display)}
+.drv-head h1 .mono{font-size:14px;color:var(--muted);font-weight:400}
+.drv-head p{margin:4px 0 10px;color:var(--muted)}
+.drv-head .seg{display:flex}
+.drv-head .seg button{flex:1;padding:9px 10px;font-size:14px}
+.drv-next{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px;display:flex;flex-direction:column;gap:6px;box-shadow:var(--shadow);border-top:4px solid var(--accent)}
+.drv-next b{font:700 22px/1.2 var(--font-display)}
+.drv-apps{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:6px}
+.drv-apps .btn{padding:14px 10px;font-size:16px;font-weight:700}
+.drv-waze{background:#33ccff;border-color:#33ccff;color:#05202b}
+.drv-gmaps{background:#1a73e8;border-color:#1a73e8;color:#fff}
+.drv-waze:hover,.drv-gmaps:hover{filter:brightness(1.06)}
+.drv-done{padding:12px;font-size:15px}
+.drv-stops{list-style:none;margin:0;padding:0;background:var(--surface);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.drv-stops li{display:grid;grid-template-columns:28px 1fr auto;gap:10px;align-items:start;padding:12px 14px;border-top:1px solid var(--line)}
+.drv-stops li:first-child{border-top:0}
+.drv-stops li.ok{opacity:.5}
+.drv-stops li.ok b{text-decoration:line-through}
+.drv-stops .mono{font-weight:600}
+.drv-stops .n.sq{display:grid;place-items:center;width:26px;height:26px;border-radius:6px;background:var(--fg);color:var(--bg);font:700 10px var(--font-display)}
+.drv-chk input{width:22px;height:22px;accent-color:var(--accent);margin:2px 0 0}
+.drv-mini{display:block;font-size:13px;margin-top:4px}
+.drv-mini a{color:var(--accent);font-weight:600}
+.drv-pref{border:1px solid var(--line);border-radius:12px;padding:12px 14px;display:flex;flex-direction:column;gap:8px;background:var(--surface)}
+.drv-pref legend{font-size:12.5px;color:var(--muted);padding:0 4px}
+.drv-auto{display:flex;align-items:center;justify-content:space-between;gap:10px}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
 </head>
@@ -376,6 +406,7 @@ dialog::backdrop{background:rgb(10 20 15 / .5);backdrop-filter:blur(2px)}
         <input type="search" id="fSearch" placeholder="Buscar por nome ou endereço" aria-label="Buscar funcionários">
         <select id="fFilter" aria-label="Filtrar por turno"></select>
         <button class="btn small" id="fGeocode" type="button">Localizar endereços pendentes</button>
+        <button class="btn small" id="fRefine" type="button" title="Procura de novo, na TomTom, quem foi encontrado só pela rua ou pelo bairro">Refinar aproximados</button>
         <span class="kpis" id="fKpis"></span>
       </div>
       <div id="fTable"></div>
@@ -450,6 +481,12 @@ dialog::backdrop{background:rgb(10 20 15 / .5);backdrop-filter:blur(2px)}
           <label class="check"><input type="checkbox" id="cRegion"> <span>Buscar endereços só em SC e na divisa com o PR</span></label>
         </div>
         <div class="card">
+          <h3>Busca de endereços (TomTom)</h3>
+          <label class="field">Chave da API TomTom<input type="password" id="cKey" autocomplete="off" placeholder="Cole a chave aqui"></label>
+          <p class="hint">Opcional e grátis (2.500 buscas por dia, sem cartão): crie em developer.tomtom.com → "Get your free API key". Com a chave, os endereços são procurados primeiro na TomTom, que tem mais números de casa; o OpenStreetMap continua como reserva. O mapa e as rotas não mudam. No painel da TomTom, restrinja a chave ao domínio do site.</p>
+          <span class="hint" id="cKeyStatus"></span>
+        </div>
+        <div class="card">
           <h3>Estimativa de trânsito</h3>
           <p class="hint">O tempo de cada trecho sem trânsito vem do OpenStreetMap. O sistema acrescenta estes percentuais conforme o horário em que o carro está rodando.</p>
           <div class="stack">
@@ -509,7 +546,8 @@ const useFirebase = !!(FIREBASE_CONFIG.apiKey && !FIREBASE_CONFIG.apiKey.startsW
 
 const data = {func:[], veic:[], turno:[], plano:[], config:{}};
 const DEFAULT_CONFIG = {nome:'Tubrax', endereco:'Estrada Três Barras, 8725, Garuva - SC', geo:null, dwell:2, after:10, region:true,
-  pm1:'06:00', pm2:'08:30', pt1:'16:30', pt2:'19:00', tfPico:30, tfNormal:10, tfNoite:0, maxRota:0};
+  pm1:'06:00', pm2:'08:30', pt1:'16:30', pt2:'19:00', tfPico:30, tfNormal:10, tfNoite:0, maxRota:0,
+  tomtomKey:'VqnT76ZUNofPzsrizESpE4XOAL8lIp8o'};
 let user = null;
 
 /* ---------------- Utilidades ---------------- */
@@ -524,7 +562,7 @@ const ymd = d => new Intl.DateTimeFormat('en-CA',{timeZone:TZ,year:'numeric',mon
 const addDays = (dateStr, n) => { const d = new Date(`${dateStr}T12:00:00-03:00`); d.setUTCDate(d.getUTCDate()+n); return ymd(d); };
 const at = (dateStr, hhmm) => new Date(`${dateStr}T${hhmm}:00-03:00`);
 function toast(msg, ms=2600){ const t = $('#toast'); t.textContent = msg; t.hidden = false; clearTimeout(toast._t); toast._t = setTimeout(()=>{ t.hidden = true; }, ms); }
-function cfg(){ return Object.assign({}, DEFAULT_CONFIG, data.config); }
+function cfg(){ const c = Object.assign({}, DEFAULT_CONFIG, data.config); if (!c.tomtomKey) c.tomtomKey = DEFAULT_CONFIG.tomtomKey; return c; }
 function turnoById(id){ return data.turno.find(t => t.id === id); }
 function parseCoords(t){
   const m = String(t||'').trim().match(/^(-?\d{1,2}(?:\.\d+)?)\s*[,;]\s*(-?\d{1,3}(?:\.\d+)?)$/);
@@ -676,7 +714,7 @@ async function nominatim(q){
   const j = await fetchJSON(url);
   return j && j[0];
 }
-async function geocode(text){
+async function geocodeOSM(text){
   const c = parseCoords(text); if (c) return {...c, prec:'numero'};
   let base = String(text).replace(/\s+-\s+/g, ', ').replace(/\s+/g,' ').trim();
   ABBR.forEach(([re, rp]) => { base = base.replace(re, rp); });
@@ -723,15 +761,76 @@ function geoFrom(r, maxPrec, fallbackLabel){
   return {lat:+r.lat, lon:+r.lon, label:String(r.display_name || fallbackLabel).split(', ').slice(0, 4).join(', '), prec};
 }
 /* Localiza um funcionário usando rua/número, bairro e cidade separados */
-async function geocodePerson(f){
+async function geocodePersonOSM(f){
   const c = parseCoords(f.endereco); if (c) return {...c, prec:'numero'};
-  if (!f.cidade) return geocode(f.endereco);
+  if (!f.cidade) return geocodeOSM(f.endereco);
   const {rua, num} = splitStreet(f.endereco), cidade = String(f.cidade).trim(), bairro = String(f.bairro||'').trim();
   if (rua && num){ const r = await nominatimStructured(`${num} ${rua}`, cidade); if (r) return geoFrom(r, 'numero', fullAddr(f)); }
   if (rua){ const r = await nominatimStructured(rua, cidade); if (r) return geoFrom(r, 'rua', fullAddr(f)); }
   if (rua && bairro){ const r = await nominatim(`${rua}, ${bairro}, ${cidade}, Santa Catarina`); if (r) return geoFrom(r, 'rua', fullAddr(f)); }
   if (bairro){ const r = await nominatim(`${bairro}, ${cidade}, Santa Catarina`); if (r) return geoFrom(r, 'bairro', fullAddr(f)); }
   const r = await nominatim(`${cidade}, Santa Catarina`); return r ? geoFrom(r, 'bairro', fullAddr(f)) : null;
+}
+/* ---------- TomTom (busca de endereços; plano grátis de 2.500 buscas/dia) ---------- */
+const PREC_RANK = {numero:0, rua:1, bairro:2};
+const inRegion = g => g && g.lat <= -25.3 && g.lat >= -29.5 && g.lon >= -54.0 && g.lon <= -48.2;
+let ttDown = false;
+async function ttFetch(url){
+  for (let attempt = 0; attempt < 3; attempt++){
+    const res = await fetch(url);
+    if (res.status === 429){ await sleep(1000*(attempt+1)); continue; }
+    if (res.status === 403 || res.status === 401) throw Object.assign(new Error('A chave da TomTom foi recusada. Confira em Configurações.'), {fatal:true});
+    if (!res.ok) throw new Error(`TomTom respondeu HTTP ${res.status}.`);
+    await sleep(220);
+    return res.json();
+  }
+  throw new Error('Limite de buscas por segundo da TomTom. Tente de novo em instantes.');
+}
+function ttGeo(r){
+  if (!r || !r.position) return null;
+  const t = r.type || '';
+  const prec = (t === 'Point Address' || t === 'Address Range') ? 'numero' : (t === 'Street' || t === 'Cross Street') ? 'rua' : 'bairro';
+  const g = {lat:r.position.lat, lon:r.position.lon, label:r.address?.freeformAddress || '', prec, fonte:'TomTom'};
+  return (!cfg().region || inRegion(g)) ? g : null;
+}
+async function ttStructured(f){
+  const key = cfg().tomtomKey; if (!key) return null;
+  const {rua, num} = splitStreet(f.endereco);
+  const p = new URLSearchParams({key, countryCode:'BR', language:'pt-BR', limit:'1', streetName:rua, municipality:String(f.cidade||'').trim()});
+  if (num) p.set('streetNumber', num);
+  if (f.bairro) p.set('municipalitySubdivision', String(f.bairro).trim());
+  const j = await ttFetch(`https://api.tomtom.com/search/2/structuredGeocode.json?${p}`);
+  return ttGeo(j.results && j.results[0]);
+}
+async function ttFree(text){
+  const key = cfg().tomtomKey; if (!key) return null;
+  let q = String(text).replace(/\s+-\s+/g, ', ').replace(/\s+/g,' ').trim();
+  ABBR.forEach(([re, rp]) => { q = q.replace(re, rp); });
+  let url = `https://api.tomtom.com/search/2/geocode/${encodeURIComponent(q)}.json?key=${encodeURIComponent(key)}&countrySet=BR&language=pt-BR&limit=1`;
+  if (cfg().region) url += '&topLeft=-25.30,-54.00&btmRight=-29.50,-48.20';
+  const j = await ttFetch(url);
+  return ttGeo(j.results && j.results[0]);
+}
+const better = (a, b) => !a ? b : !b ? a : (PREC_RANK[b.prec] < PREC_RANK[a.prec] ? b : a);
+/* Busca de endereço: TomTom primeiro (quando há chave); OpenStreetMap como reserva ou se achar algo melhor */
+async function withTT(ttCall, osmCall){
+  let g = null;
+  if (cfg().tomtomKey && !ttDown){
+    try{ g = await ttCall(); }
+    catch(e){ if (e.fatal){ ttDown = true; toast(e.message + ' Usando o OpenStreetMap.', 7000); } }
+  }
+  if (g && g.prec === 'numero') return g;
+  let o = null; try{ o = await osmCall(); }catch(e){ if (!g) throw e; }
+  if (o) o.fonte = o.fonte || 'OpenStreetMap';
+  return better(g, o);
+}
+async function geocode(text){
+  const c = parseCoords(text); if (c) return {...c, prec:'numero', fonte:'coordenadas'};
+  return withTT(() => ttFree(text), () => geocodeOSM(text));
+}
+async function geocodePerson(f){
+  const c = parseCoords(f.endereco); if (c) return {...c, prec:'numero', fonte:'coordenadas'};
+  return withTT(() => f.cidade ? ttStructured(f) : ttFree(f.endereco), () => geocodePersonOSM(f));
 }
 const OSRM = ['https://router.project-osrm.org', 'https://routing.openstreetmap.de/routed-car'];
 async function routeOSRM(points){
@@ -804,9 +903,10 @@ function geoChip(o, addrKey){
   if (!o.geo) return o.geoFalhou
     ? '<span class="chip err" title="A busca não encontrou este endereço. Corrija o endereço ou use coordenadas (lat, lon).">Não encontrado</span>'
     : '<span class="chip warn" title="Clique em Localizar endereços pendentes">Aguardando localização</span>';
-  if (o.geo.prec === 'bairro') return '<span class="chip warn" title="Encontrado só pelo bairro ou cidade. Confira a rua ou use coordenadas (lat, lon).">Só bairro/cidade</span>';
-  if (o.geo.prec === 'rua') return '<span class="chip ok" title="Encontrado pela rua, sem o número exato.">Rua</span>';
-  return '<span class="chip ok">Localizado</span>';
+  const src = o.geo.fonte ? ` · fonte: ${o.geo.fonte}` : '';
+  if (o.geo.prec === 'bairro') return `<span class="chip warn" title="Encontrado só pelo bairro ou cidade${src}. Confira a rua ou use coordenadas (lat, lon).">Só bairro/cidade</span>`;
+  if (o.geo.prec === 'rua') return `<span class="chip ok" title="Encontrado pela rua, sem o número exato${src}.">Rua</span>`;
+  return `<span class="chip ok" title="Encontrado com o número${src}">Localizado</span>`;
 }
 function cnhChip(f){
   if (f.cnh === 'fixo'){ const v = data.veic.find(x=>x.id===f.veiculoFixo); return `<span class="chip ok">Motorista fixo</span>${v?`<span class="sub">${esc(v.nome)}</span>`:''}`; }
@@ -845,7 +945,7 @@ $('#fGeocode').addEventListener('click', async () => {
   const flush = async () => { if (buf.length){ const b = buf; buf = []; await Store.saveMany('func', b); } };
   try{
     for (const [i, o] of pend.entries()){
-      const rest = Math.ceil((pend.length - i) * 1.3 / 60);
+      const rest = Math.ceil((pend.length - i) * (cfg().tomtomKey ? 0.4 : 1.3) / 60);
       btn.textContent = `Localizando ${i+1}/${pend.length}… (~${rest} min)`;
       const g = await geocodePerson(o);
       if (g){ ok++; const c = {...o, geo:g}; delete c.geoFalhou; buf.push(c); } else { fail++; buf.push({...o, geoFalhou:true}); }
@@ -855,6 +955,26 @@ $('#fGeocode').addEventListener('click', async () => {
   await flush();
   btn.disabled = false; btn.textContent = 'Localizar endereços pendentes';
   toast(`${ok} localizado${ok===1?'':'s'}` + (fail ? `, ${fail} não encontrado${fail===1?'':'s'}. Revise o endereço ou use coordenadas (lat, lon).` : '.'), 6000);
+});
+
+$('#fRefine').addEventListener('click', async () => {
+  if (!cfg().tomtomKey){ toast('Cole a chave da TomTom em Configurações → Busca de endereços para refinar.', 6000); return; }
+  const list = data.func.filter(f => f.geo && ['rua','bairro'].includes(f.geo.prec) && f.geo.fonte !== 'coordenadas' && !parseCoords(f.endereco));
+  if (!list.length){ toast('Nenhum endereço aproximado para refinar.'); return; }
+  const btn = $('#fRefine'); btn.disabled = true; ttDown = false;
+  let melhor = 0, buf = [];
+  const flush = async () => { if (buf.length){ const b = buf; buf = []; await Store.saveMany('func', b); } };
+  try{
+    for (const [i, f] of list.entries()){
+      btn.textContent = `Refinando ${i+1}/${list.length}…`;
+      let g = null;
+      try{ g = f.cidade ? await ttStructured(f) : await ttFree(f.endereco); }
+      catch(e){ if (e.fatal){ toast(e.message, 6000); break; } }
+      if (g && PREC_RANK[g.prec] < PREC_RANK[f.geo.prec]){ melhor++; buf.push({...f, geo:g}); }
+      if (buf.length >= 10) await flush();
+    }
+  }finally{ await flush(); btn.disabled = false; btn.textContent = 'Refinar aproximados'; }
+  toast(`${melhor} de ${list.length} endereço${list.length>1?'s':''} ficou mais preciso. Os demais continuam como estavam.`, 6500);
 });
 
 /* Importação Excel */
@@ -995,7 +1115,8 @@ function renderConfig(){
   const c = cfg();
   if (document.activeElement?.closest('#tab-config')) return;
   $('#cNome').value = c.nome || ''; $('#cEnd').value = c.endereco || '';
-  $('#cDwell').value = c.dwell; $('#cAfter').value = c.after; $('#cRegion').checked = !!c.region;
+  $('#cDwell').value = c.dwell; $('#cAfter').value = c.after; $('#cRegion').checked = !!c.region; $('#cKey').value = c.tomtomKey || '';
+  $('#cKeyStatus').innerHTML = c.tomtomKey ? '<span style="color:var(--ok)">✓ Chave salva — a TomTom é usada primeiro.</span>' : 'Sem chave: os endereços são buscados só no OpenStreetMap.';
   $('#cPm1').value = c.pm1; $('#cPm2').value = c.pm2; $('#cPt1').value = c.pt1; $('#cPt2').value = c.pt2;
   $('#cTfPico').value = c.tfPico; $('#cTfNormal').value = c.tfNormal; $('#cTfNoite').value = c.tfNoite; $('#cMaxRota').value = +c.maxRota || 0;
   $('#cGeo').innerHTML = c.geo ? `✓ ${esc(c.geo.label)}` : '<span style="color:var(--red)">Endereço da empresa ainda não localizado. Clique em Salvar configurações.</span>';
@@ -1009,11 +1130,12 @@ $('#cSave').addEventListener('click', async () => {
   const btn = $('#cSave'); btn.disabled = true;
   const patch = {nome:$('#cNome').value.trim(), endereco:$('#cEnd').value.trim(), dwell:+$('#cDwell').value||0, after:+$('#cAfter').value||0, region:$('#cRegion').checked,
     pm1:$('#cPm1').value||'06:00', pm2:$('#cPm2').value||'08:30', pt1:$('#cPt1').value||'16:30', pt2:$('#cPt2').value||'19:00',
-    tfPico:+$('#cTfPico').value||0, tfNormal:+$('#cTfNormal').value||0, tfNoite:+$('#cTfNoite').value||0, maxRota:Math.max(0, +$('#cMaxRota').value||0)};
+    tfPico:+$('#cTfPico').value||0, tfNormal:+$('#cTfNormal').value||0, tfNoite:+$('#cTfNoite').value||0, maxRota:Math.max(0, +$('#cMaxRota').value||0), tomtomKey:$('#cKey').value.trim()};
   const c = cfg();
+  if (patch.tomtomKey !== (c.tomtomKey||'')) ttDown = false;
   try{
-    if (patch.endereco && (patch.endereco !== c.endereco || !c.geo)){
-      data.config.region = patch.region;
+    if (patch.endereco && (patch.endereco !== c.endereco || !c.geo || (patch.tomtomKey && c.geo.prec !== 'numero' && c.geo.fonte !== 'coordenadas'))){
+      data.config.region = patch.region; data.config.tomtomKey = patch.tomtomKey; ttDown = false;
       patch.geo = await geocode(patch.endereco);
       if (!patch.geo) toast('Endereço da empresa não encontrado. Use as coordenadas do portão (lat, lon), copiadas do Google Maps.', 6000);
       else if (patch.geo.prec !== 'numero') toast('Endereço da empresa encontrado de forma aproximada. Para precisão, use as coordenadas do portão (lat, lon).', 7000);
@@ -1730,7 +1852,8 @@ function renderResults(){
             ${freeCars.length ? `<select class="mini" data-act="car" data-k="${key}" aria-label="Trocar carro"><option value="">Trocar carro…</option>${freeCars.map(v=>`<option value="${v.id}">${esc(v.nome)} (${v.capacidade} lugares)</option>`).join('')}</select>` : ''}
           </div>
           <div class="btn-row view-only">
-            <button class="btn small" data-act="copy" data-k="${key}" type="button">Copiar para o motorista</button>
+            <button class="btn small accent" data-act="link" data-k="${key}" type="button">Link do motorista</button>
+            <button class="btn small" data-act="copy" data-k="${key}" type="button">Copiar texto</button>
             <button class="btn small" data-act="edit" data-k="${key}" type="button">✎ Editar rota</button>
           </div>
           <div class="btn-row edit-only">
@@ -1784,6 +1907,7 @@ function renderResults(){
       else if (a === 'del') Edit.deleteRoute(T, k);
       else if (a === 'newroute') Edit.newRoute(T, fid);
       else if (a === 'copy'){ const p = plan.find(x => x.turno.id === T); copyRoute(p, p.routes.find(r => r.key === k)); }
+      else if (a === 'link'){ const p = plan.find(x => x.turno.id === T); sendDriverLink(p, p.routes.find(r => r.key === k)); }
     });
   });
 }
@@ -1837,7 +1961,7 @@ function copyRoute(p, r){
   r.ida.stops.forEach((s,i) => L1.push(`${i+1}. ${fmtTime(s.at)} – ${s.f.nome} – ${fullAddr(s.f)}`));
   L1.push(`Chegada na empresa: ${fmtTime(r.ida.arr)}`, '', `*VOLTA* – sair da empresa às ${fmtTime(r.volta.dep)}`);
   r.volta.stops.forEach((s,i) => L1.push(`${i+1}. ${fmtTime(s.at)} – ${s.f.nome}`));
-  L1.push(`Chegada em casa: ${fmtTime(r.volta.arr)}`);
+  L1.push(`Chegada em casa: ${fmtTime(r.volta.arr)}`, '', `Rota no Waze / Google Maps: ${driverLink(p, r)}`);
   const txt = L1.join('\n');
   const done = () => toast('Rota copiada. Cole no WhatsApp do motorista.');
   navigator.clipboard?.writeText(txt).then(done).catch(() => {
@@ -1847,13 +1971,13 @@ function copyRoute(p, r){
 }
 $('#exportPlan').addEventListener('click', () => {
   if (!plan) return;
-  const resumo = [['Turno','Veículo','Placa','Motorista','Telefone motorista','Ocupantes','Lugares','Ida: sai de casa','Ida: chega empresa','Ida km','Volta: sai empresa','Volta: chega em casa','Volta km','Ajustada manualmente']];
+  const resumo = [['Turno','Veículo','Placa','Motorista','Telefone motorista','Ocupantes','Lugares','Ida: sai de casa','Ida: chega empresa','Ida km','Volta: sai empresa','Volta: chega em casa','Volta km','Ajustada manualmente','Link do motorista']];
   const ida = [['Turno','Veículo','Motorista','Ordem','Funcionário','Endereço','Telefone','Embarque','Tempo a bordo (min)']];
   const volta = [['Turno','Veículo','Motorista','Ordem','Funcionário','Endereço','Telefone','Desembarque','Tempo a bordo (min)']];
   const sem = [['Turno','Funcionário','Endereço','Motivo']];
   plan.forEach(p => {
     p.routes.forEach(r => {
-      resumo.push([p.turno.nome, r.v.nome, r.v.placa||'', r.driver.nome, r.driver.telefone||'', r.ida.stops.length+1, +r.v.capacidade, fmtTime(r.ida.dep), fmtTime(r.ida.arr), +(r.ida.meters/1000).toFixed(1), fmtTime(r.volta.dep), fmtTime(r.volta.arr), +(r.volta.meters/1000).toFixed(1), r.manual?'Sim':'']);
+      resumo.push([p.turno.nome, r.v.nome, r.v.placa||'', r.driver.nome, r.driver.telefone||'', r.ida.stops.length+1, +r.v.capacidade, fmtTime(r.ida.dep), fmtTime(r.ida.arr), +(r.ida.meters/1000).toFixed(1), fmtTime(r.volta.dep), fmtTime(r.volta.arr), +(r.volta.meters/1000).toFixed(1), r.manual?'Sim':'', driverLink(p, r)]);
       ida.push([p.turno.nome, r.v.nome, r.driver.nome, 'Motorista', r.driver.nome, fullAddr(r.driver), r.driver.telefone||'', 'Sai '+fmtTime(r.ida.dep), Math.round((r.ida.arr-r.ida.dep)/60000)]);
       r.ida.stops.forEach((s,i) => ida.push([p.turno.nome, r.v.nome, r.driver.nome, i+1, s.f.nome, fullAddr(s.f), s.f.telefone||'', fmtTime(s.at), Math.round(s.onboard/60)]));
       r.volta.stops.forEach((s,i) => volta.push([p.turno.nome, r.v.nome, r.driver.nome, i+1, s.f.nome, fullAddr(s.f), s.f.telefone||'', fmtTime(s.at), Math.round(s.onboard/60)]));
@@ -1868,7 +1992,138 @@ $('#exportPlan').addEventListener('click', () => {
   XLSX.writeFile(wb, `rotas-${ymd(new Date())}.xlsx`);
 });
 
+/* ---------------- Link do motorista ----------------
+   Os dados da rota vão no próprio link (depois do #), então o motorista abre sem login e sem consultar o banco.
+   Se a rota mudar, é só gerar e enviar o link de novo. */
+const b64e = str => btoa(unescape(encodeURIComponent(str))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+const b64d = str => decodeURIComponent(escape(atob(str.replace(/-/g,'+').replace(/_/g,'/'))));
+const r5 = n => Math.round(n*1e5)/1e5;
+function driverLink(p, r){
+  const c = cfg(), co = c.geo;
+  const st = s => [s.f.nome, r5(s.f.geo?.lat||0), r5(s.f.geo?.lon||0), fmtTime(s.at), fullAddr(s.f)];
+  const d = {v:1, k:r.key, c:r.v.nome, pl:r.v.placa||'', t:p.turno.nome, te:p.turno.entrada, ts:p.turno.saida, m:r.driver.nome,
+    h:[r5(r.driver.geo?.lat||0), r5(r.driver.geo?.lon||0)], e:[c.nome||'Empresa', r5(co.lat), r5(co.lon)],
+    i:{d:fmtTime(r.ida.dep), a:fmtTime(r.ida.arr), s:r.ida.stops.filter(s=>s.f.geo).map(st)},
+    o:{d:fmtTime(r.volta.dep), a:fmtTime(r.volta.arr), s:r.volta.stops.filter(s=>s.f.geo).map(st)}};
+  return `${location.origin}${location.pathname}#r=${b64e(JSON.stringify(d))}`;
+}
+function waPhone(tel){
+  let d = String(tel||'').replace(/\D/g,''); if (!d) return '';
+  if (d.length === 10 || d.length === 11) d = '55' + d;
+  return d;
+}
+function sendDriverLink(p, r){
+  const link = driverLink(p, r);
+  const msg = `Olá, ${r.driver.nome.split(' ')[0]}! Esta é a sua rota do ${p.turno.nome} (${r.v.nome}).\nIda: sair de casa às ${fmtTime(r.ida.dep)} · Volta: sair da empresa às ${fmtTime(r.volta.dep)}.\nAbra o link para seguir a rota no Waze ou no Google Maps:\n${link}`;
+  const tel = waPhone(r.driver.telefone);
+  $('#dlgForm').innerHTML = `<h3>Link do motorista</h3>
+    <p class="hint">${esc(r.driver.nome)} · ${esc(r.v.nome)} · ${esc(p.turno.nome)}. Ao abrir, o motorista vê as paradas e segue a rota no Waze ou no Google Maps, sem precisar de login.</p>
+    <label class="field">Link<input type="text" id="lnkTxt" readonly value="${esc(link)}"></label>
+    <div class="btn-row">
+      <button class="btn accent" type="button" id="lnkCopy">Copiar link</button>
+      <a class="btn" id="lnkWa" target="_blank" rel="noopener" href="https://wa.me/${tel}?text=${encodeURIComponent(msg)}">Enviar pelo WhatsApp${tel?'':' (escolher contato)'}</a>
+      <a class="btn ghost" target="_blank" rel="noopener" href="${esc(link)}">Ver como o motorista</a>
+    </div>
+    <p class="hint">${tel ? `O WhatsApp abre direto na conversa com ${esc(r.driver.telefone)}.` : 'Cadastre o telefone do motorista para o WhatsApp abrir direto na conversa dele.'} Se a rota for alterada, envie o link de novo.</p>
+    <div class="dlg-actions"><button class="btn ghost" type="button" id="lnkClose">Fechar</button></div>`;
+  $('#lnkClose').onclick = () => $('#dlg').close();
+  $('#lnkCopy').onclick = () => {
+    navigator.clipboard?.writeText(link).then(() => toast('Link copiado.')).catch(() => { $('#lnkTxt').select(); document.execCommand('copy'); toast('Link copiado.'); });
+  };
+  $('#lnkTxt').addEventListener('focus', e => e.target.select());
+  $('#dlg').showModal();
+}
+
+/* Página que o motorista vê ao abrir o link */
+function renderDriverPage(){
+  let d;
+  try{ d = JSON.parse(b64d(location.hash.slice(3))); }catch{ d = null; }
+  document.querySelector('.top').hidden = true; document.querySelector('main').hidden = true;
+  const root = document.createElement('div'); root.className = 'drv'; document.body.appendChild(root);
+  if (!d || !d.i){ root.innerHTML = '<div class="drv-wrap"><div class="empty">Este link de rota está incompleto ou foi copiado pela metade. Peça um novo link ao responsável pelo transporte.</div></div>'; return; }
+  document.title = `Rota ${d.c} · ${d.m}`;
+  const nowMin = minOfDay(new Date());
+  const inWin = (a, b) => { const x = hm(a), y = hm(b); return y >= x ? (nowMin >= x && nowMin <= y) : (nowMin >= x || nowMin <= y); };
+  const sub = (t, m) => { let x = hm(t) - m; return `${String(Math.floor(((x%1440)+1440)%1440/60)).padStart(2,'0')}:${String(((x%60)+60)%60).padStart(2,'0')}`; };
+  let dir = inWin(sub(d.o.d, 60), sub(d.o.a, -30)) ? 'o' : inWin(sub(d.i.d, 120), sub(d.i.a, -30)) ? 'i' : (((hm(d.o.d) - nowMin + 1440) % 1440) < ((hm(d.i.d) - nowMin + 1440) % 1440) ? 'o' : 'i');
+  const PREF = 'rotSC.app', doneKey = () => `rotSC.feito.${d.k}.${dir}.${ymd(new Date())}`;
+  const getDone = () => { try{ return new Set(JSON.parse(localStorage.getItem(doneKey())) || []); }catch{ return new Set(); } };
+  const setDone = s => { try{ localStorage.setItem(doneKey(), JSON.stringify([...s])); }catch{} };
+  const getPref = () => { try{ return localStorage.getItem(PREF) || 'ask'; }catch{ return 'ask'; } };
+  const setPref = v => { try{ localStorage.setItem(PREF, v); }catch{} };
+  const waze = (la, lo) => `https://waze.com/ul?ll=${la},${lo}&navigate=yes`;
+  const gOne = (la, lo) => `https://www.google.com/maps/dir/?api=1&destination=${la},${lo}&travelmode=driving&dir_action=navigate`;
+  let firstLoad = true, timer = null;
+
+  function render(){
+    const R = d[dir], done = getDone();
+    const final = dir === 'i' ? {nome:d.e[0], la:d.e[1], lo:d.e[2], t:R.a, label:'Chegada à empresa'} : {nome:'Sua casa', la:d.h[0], lo:d.h[1], t:R.a, label:'Chegada em casa'};
+    const pend = R.s.map((s, i) => ({s, i})).filter(x => !done.has(x.i));
+    const next = pend[0];
+    const nextLa = next ? next.s[1] : final.la, nextLo = next ? next.s[2] : final.lo;
+    const way = pend.slice(0, 9).map(x => `${x.s[1]},${x.s[2]}`);
+    const destFull = pend.length > 9 ? `${pend[9].s[1]},${pend[9].s[2]}` : `${final.la},${final.lo}`;
+    const gFull = `https://www.google.com/maps/dir/?api=1&destination=${destFull}&travelmode=driving&dir_action=navigate${way.length ? '&waypoints=' + encodeURIComponent(way.join('|')) : ''}`;
+    const pref = getPref();
+    root.innerHTML = `<div class="drv-wrap">
+      <header class="drv-top"><div class="brand-logo"><span class="wordmark">GRUPO TBX</span></div><span class="hint">Rota do motorista</span></header>
+      <section class="drv-head">
+        <h1>${esc(d.c)} <span class="mono">${esc(d.pl)}</span></h1>
+        <p>${esc(d.m)} · ${esc(d.t)} (${esc(d.te)}–${esc(d.ts)})</p>
+        <div class="seg" role="group" aria-label="Trajeto"><button type="button" data-dir="i" aria-pressed="${dir==='i'}">Ida · sai ${esc(d.i.d)}</button><button type="button" data-dir="o" aria-pressed="${dir==='o'}">Volta · sai ${esc(d.o.d)}</button></div>
+      </section>
+      <div id="autoBox"></div>
+      <section class="drv-next">
+        <span class="hint">${next ? `Próxima parada · ${pend.length} de ${R.s.length} restante${pend.length>1?'s':''}` : 'Todas as paradas concluídas'}</span>
+        <b>${esc(next ? next.s[0] : final.label)}</b>
+        <span class="sub">${esc(next ? (next.s[4] || '') : final.nome)} · previsto ${esc(next ? next.s[3] : final.t)}</span>
+        <div class="drv-apps">
+          <a class="btn drv-waze" href="${waze(nextLa, nextLo)}" data-app="waze">Waze</a>
+          <a class="btn drv-gmaps" href="${gOne(nextLa, nextLo)}" data-app="gone">Google Maps</a>
+        </div>
+        ${next ? `<button class="btn accent drv-done" type="button" data-done="${next.i}">✓ ${dir==='i'?'Embarcou':'Desembarcou'} — ir para a próxima</button>` : ''}
+      </section>
+      <a class="btn primary" href="${gFull}" data-app="gmaps">Rota completa no Google Maps${pend.length > 9 ? ' (próximas 9 paradas)' : ''}</a>
+      <ol class="drv-stops">
+        <li class="drv-end"><span class="n sq">${dir==='i'?'⌂':'CD'}</span><div><b>${dir==='i'?'Saída de casa':'Saída da empresa'}</b></div><span class="mono">${esc(R.d)}</span></li>
+        ${R.s.map((s, i) => `<li class="${done.has(i)?'ok':''}">
+          <label class="drv-chk"><input type="checkbox" data-chk="${i}" ${done.has(i)?'checked':''} aria-label="Marcar ${esc(s[0])} como feito"></label>
+          <div><b>${i+1}. ${esc(s[0])}</b><span class="sub">${esc(s[4]||'')}</span>
+            <span class="drv-mini"><a href="${waze(s[1], s[2])}">Waze</a> · <a href="${gOne(s[1], s[2])}">Google Maps</a></span></div>
+          <span class="mono">${esc(s[3])}</span></li>`).join('')}
+        <li class="drv-end"><span class="n sq">${dir==='i'?'CD':'⌂'}</span><div><b>${esc(final.label)}</b><span class="sub">${esc(final.nome)}</span></div><span class="mono">${esc(final.t)}</span></li>
+      </ol>
+      <fieldset class="drv-pref"><legend>Ao abrir este link</legend>
+        ${[['ask','Perguntar'],['gmaps','Abrir o Google Maps com a rota'],['waze','Abrir o Waze na próxima parada']].map(([v,t]) => `<label class="check"><input type="radio" name="pref" value="${v}" ${pref===v?'checked':''}> <span>${t}</span></label>`).join('')}
+      </fieldset>
+      <p class="hint">Horários estimados. Marque cada parada ao concluir: a próxima já aparece no topo e a rota completa passa a começar dela.</p>
+    </div>`;
+    root.querySelectorAll('[data-dir]').forEach(b => b.onclick = () => { dir = b.dataset.dir; stopAuto(); render(); });
+    root.querySelectorAll('[data-chk]').forEach(c => c.onchange = () => { const s = getDone(); c.checked ? s.add(+c.dataset.chk) : s.delete(+c.dataset.chk); setDone(s); render(); });
+    root.querySelector('[data-done]')?.addEventListener('click', e => { const s = getDone(); s.add(+e.target.dataset.done); setDone(s); render(); });
+    root.querySelectorAll('input[name=pref]').forEach(r => r.onchange = () => { setPref(r.value); stopAuto(); });
+    root.querySelectorAll('[data-app]').forEach(a => a.addEventListener('click', stopAuto));
+    if (firstLoad){
+      firstLoad = false;
+      const target = pref === 'waze' ? waze(nextLa, nextLo) : pref === 'gmaps' ? gFull : null;
+      if (target){
+        let n = 3;
+        const box = root.querySelector('#autoBox');
+        const tick = () => {
+          box.innerHTML = `<div class="notice drv-auto">Abrindo ${pref === 'waze' ? 'o Waze' : 'o Google Maps'} em ${n}s… <button class="btn small" type="button" id="autoStop">Cancelar</button></div>`;
+          box.querySelector('#autoStop').onclick = stopAuto;
+          if (n-- <= 0){ stopAuto(); location.href = target; }
+        };
+        tick(); timer = setInterval(tick, 1000);
+      }
+    }
+  }
+  function stopAuto(){ if (timer){ clearInterval(timer); timer = null; } const b = root.querySelector('#autoBox'); if (b) b.innerHTML = ''; }
+  render();
+}
+
 /* ---------------- Início ---------------- */
+if (location.hash.startsWith('#r=')){ renderDriverPage(); return; }
 renderWho();
 Store.init ? Store.init() : null;
 if (useFirebase) $('#login').hidden = false;
