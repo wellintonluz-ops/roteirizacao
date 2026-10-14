@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Roteirizador SC</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 32 32%27%3E%3Crect width=%2732%27 height=%2732%27 rx=%276%27 fill=%27%230f6b47%27/%3E%3Ctext x=%2716%27 y=%2721%27 font-size=%2713%27 font-family=%27Arial%27 font-weight=%27700%27 fill=%27white%27 text-anchor=%27middle%27%3ESC%3C/text%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap">
@@ -41,6 +42,7 @@
   color-scheme:dark;
 }
 *{box-sizing:border-box}
+[hidden]{display:none!important}
 html,body{height:100%;margin:0}
 body{background:var(--bg);color:var(--fg);font:15px/1.45 var(--font-body);display:flex;flex-direction:column}
 button,input,select,textarea{font:inherit;color:inherit}
@@ -482,9 +484,19 @@ const Fire = {
       this.db.collection(col).onSnapshot(snap => {
         data[kind] = snap.docs.map(d => ({id:d.id, ...d.data()}));
         renderAll();
-      }, err => toast('Erro ao ler ' + col + ': ' + err.message, 6000));
+      }, err => this.fail(err, col));
     });
-    this.db.collection(COL.config).doc('app').onSnapshot(d => { data.config = d.exists ? d.data() : {}; renderAll(); });
+    this.db.collection(COL.config).doc('app').onSnapshot(d => { data.config = d.exists ? d.data() : {}; renderAll(); }, err => this.fail(err, COL.config));
+  },
+  fail(err, col){
+    console.error(col, err);
+    if (this._warned) return; this._warned = true;
+    const msg = err.code === 'permission-denied'
+      ? 'O Firestore recusou o acesso. Publique as regras de segurança do roteirizador no console do Firebase (Firestore Database → Regras) e recarregue a página.'
+      : 'Erro ao ler os dados (' + col + '): ' + err.message;
+    const n = document.createElement('div'); n.className = 'notice err'; n.style.cssText = 'margin:12px max(16px,env(safe-area-inset-left,0px));';
+    n.innerHTML = '<b>Sem acesso ao banco de dados.</b> ' + esc(msg);
+    document.querySelector('main').prepend(n);
   },
   clean(obj){ const o = {...obj}; delete o.id; o.atualizadoEm = firebase.firestore.FieldValue.serverTimestamp(); o.atualizadoPor = user?.email || ''; return o; },
   async save(kind, obj){
