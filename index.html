@@ -173,6 +173,15 @@ pre.code{margin:0;padding:10px;background:var(--surface-2);border-radius:6px;fon
 .row-act .icon-btn:disabled{opacity:.35;cursor:default}
 select.mini{width:auto;min-width:0;max-width:100%;padding:3px 6px;font-size:12.5px;border-radius:5px}
 .edit-row{display:flex;flex-wrap:wrap;gap:6px;padding-top:4px}
+.drvmode{border:0;padding:0;margin:0;display:flex;flex-wrap:wrap;gap:6px 16px}
+.drvmode legend{font-size:12.5px;color:var(--muted);padding:0;margin-bottom:4px}
+.drv-list{max-height:260px;overflow-y:auto;border:1px solid var(--line);border-radius:6px;margin-top:6px;background:var(--bg)}
+.drv-list label{display:grid;grid-template-columns:auto 1fr auto;gap:8px;align-items:center;padding:6px 10px;border-top:1px solid var(--line);font-size:13.5px;cursor:pointer}
+.drv-list label:first-child{border-top:0}
+.drv-list label:hover{background:var(--surface-2)}
+.drv-list input{accent-color:var(--accent)}
+.drv-list .sub{grid-column:2}
+.drv-list .km{font:12px var(--font-mono);color:var(--muted)}
 .pool{border:1px dashed var(--red);border-radius:var(--radius);padding:8px 10px;background:var(--red-soft);font-size:13.5px}
 .pool ul{list-style:none;margin:6px 0 0;padding:0;display:flex;flex-direction:column;gap:6px}
 .pool li{display:flex;flex-wrap:wrap;justify-content:space-between;gap:6px;align-items:center;border-top:1px solid color-mix(in srgb,var(--red) 20%,transparent);padding-top:6px}
@@ -240,7 +249,17 @@ dialog::backdrop{background:rgb(10 20 15 / .45)}
         </label>
         <div class="pre-sum" id="preSum"></div>
         <div id="preWarn"></div>
-        <label class="check"><input type="checkbox" id="rFewer" checked> <span>Usar o menor número de carros possível<br><span class="hint">Desmarcado, usa todos os carros com motorista disponível e reduz o tempo a bordo.</span></span></label>
+        <fieldset class="drvmode">
+          <legend>Motoristas</legend>
+          <label class="check"><input type="radio" name="drvMode" value="auto" checked> <span>Automático, entre quem tem CNH</span></label>
+          <label class="check"><input type="radio" name="drvMode" value="manual"> <span>Escolher os motoristas</span></label>
+        </fieldset>
+        <label class="check" id="fewerWrap"><input type="checkbox" id="rFewer" checked> <span>Usar o menor número de carros possível<br><span class="hint">Desmarcado, usa todos os carros com motorista disponível e reduz o tempo a bordo.</span></span></label>
+        <div id="drvPick" hidden>
+          <input type="search" id="drvSearch" placeholder="Buscar funcionário ou bairro" aria-label="Buscar motorista">
+          <div class="drv-list" id="drvList"></div>
+          <p class="hint" id="drvInfo"></p>
+        </div>
         <button class="btn primary" id="runBtn" type="button">Montar rotas</button>
         <p class="hint" id="runHint"></p>
         <div class="progress" aria-hidden="true"><span id="bar"></span></div>
@@ -567,7 +586,8 @@ async function nominatim(q){
 }
 async function geocode(text){
   const c = parseCoords(text); if (c) return {...c, prec:'numero'};
-  const base = String(text).replace(/\s+-\s+/g, ', ').replace(/\s+/g,' ').trim();
+  let base = String(text).replace(/\s+-\s+/g, ', ').replace(/\s+/g,' ').trim();
+  ABBR.forEach(([re, rp]) => { base = base.replace(re, rp); });
   const semNumero = base.replace(/(,\s*|\s+n[ºo°.]?\s*)\d+[A-Za-z]?(?=\s*(,|$))/i, '');
   const parts = base.split(',').map(x=>x.trim()).filter(Boolean);
   const tries = [[base,'numero'], [semNumero,'rua'], [parts.slice(1).join(', '),'bairro']];
@@ -584,6 +604,42 @@ async function geocode(text){
     return {lat:+r.lat, lon:+r.lon, label, prec};
   }
   return null;
+}
+/* Endereço de funcionário em colunas: rua e número, bairro, cidade */
+const fullAddr = f => [f?.endereco, f?.bairro, f?.cidade].map(x => String(x||'').trim()).filter(Boolean).join(', ');
+const ABBR = [[/^R\.?\s+/i,'Rua '],[/^Av\.?\s+/i,'Avenida '],[/^Estr\.?\s+/i,'Estrada '],[/^Rod\.?\s+/i,'Rodovia '],[/^Trav\.?\s+/i,'Travessa '],[/^Tv\.?\s+/i,'Travessa '],[/^Al\.?\s+/i,'Alameda '],[/^P[çc]a?\.?\s+/i,'Praça '],[/^Serv\.?\s+/i,'Servidão '],
+  [/\bTen\.\s*/gi,'Tenente '],[/\bCel\.\s*/gi,'Coronel '],[/\bDr\.\s*/gi,'Doutor '],[/\bPres\.\s*/gi,'Presidente '],[/\bGov\.\s*/gi,'Governador '],[/\bProf\.\s*/gi,'Professor '],[/\bSen\.\s*/gi,'Senador '],[/\bDep\.\s*/gi,'Deputado '],[/\bSto\.\s*/gi,'Santo '],[/\bSta\.\s*/gi,'Santa '],[/\bCap\.\s*/gi,'Capitão '],[/\bMal\.\s*/gi,'Marechal '],[/\bEng\.\s*/gi,'Engenheiro ']];
+function splitStreet(txt){
+  let t = String(txt||'').replace(/\s+/g,' ').trim().replace(/[\s,–-]+$/,'');
+  ABBR.forEach(([re, rep]) => { t = t.replace(re, rep); });
+  const m = t.match(/^(.*?)[,\s]+(?:n[ºo°.]?\s*)?(\d+[A-Za-z]?)(?:\s*[-–/,].*)?$/i);
+  return m ? {rua:m[1].replace(/,\s*$/,'').trim(), num:m[2]} : {rua:t.replace(/\s*[-–].*$/,'').trim(), num:''};
+}
+async function nominatimStructured(street, city){
+  const wait = lastNom + 1100 - Date.now(); if (wait > 0) await sleep(wait);
+  lastNom = Date.now();
+  let url = `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&addressdetails=1&countrycodes=br&accept-language=pt-BR&street=${encodeURIComponent(street)}&city=${encodeURIComponent(city)}&state=${encodeURIComponent('Santa Catarina')}`;
+  if (cfg().region) url += '&viewbox=-54.0,-25.3,-48.2,-29.5&bounded=1';
+  const j = await fetchJSON(url); return j && j[0];
+}
+function geoFrom(r, maxPrec, fallbackLabel){
+  const t = (r.addresstype || r.type || '').toLowerCase();
+  let prec = (r.address?.house_number || ['house','building'].includes(t)) ? 'numero'
+           : (r.category === 'highway' || r.class === 'highway' || ['road','street'].includes(t)) ? 'rua' : 'bairro';
+  const order = ['numero','rua','bairro'];
+  if (order.indexOf(prec) < order.indexOf(maxPrec)) prec = maxPrec;
+  return {lat:+r.lat, lon:+r.lon, label:String(r.display_name || fallbackLabel).split(', ').slice(0, 4).join(', '), prec};
+}
+/* Localiza um funcionário usando rua/número, bairro e cidade separados */
+async function geocodePerson(f){
+  const c = parseCoords(f.endereco); if (c) return {...c, prec:'numero'};
+  if (!f.cidade) return geocode(f.endereco);
+  const {rua, num} = splitStreet(f.endereco), cidade = String(f.cidade).trim(), bairro = String(f.bairro||'').trim();
+  if (rua && num){ const r = await nominatimStructured(`${num} ${rua}`, cidade); if (r) return geoFrom(r, 'numero', fullAddr(f)); }
+  if (rua){ const r = await nominatimStructured(rua, cidade); if (r) return geoFrom(r, 'rua', fullAddr(f)); }
+  if (rua && bairro){ const r = await nominatim(`${rua}, ${bairro}, ${cidade}, Santa Catarina`); if (r) return geoFrom(r, 'rua', fullAddr(f)); }
+  if (bairro){ const r = await nominatim(`${bairro}, ${cidade}, Santa Catarina`); if (r) return geoFrom(r, 'bairro', fullAddr(f)); }
+  const r = await nominatim(`${cidade}, Santa Catarina`); return r ? geoFrom(r, 'bairro', fullAddr(f)) : null;
 }
 const OSRM = ['https://router.project-osrm.org', 'https://routing.openstreetmap.de/routed-car'];
 async function routeOSRM(points){
@@ -666,7 +722,7 @@ function cnhChip(f){
 function renderFunc(){
   const q = $('#fSearch').value.trim().toLowerCase(), ft = $('#fFilter').value;
   let list = data.func.slice().sort((a,b)=>(a.nome||'').localeCompare(b.nome||'','pt-BR'));
-  if (q) list = list.filter(f => (f.nome+' '+f.endereco).toLowerCase().includes(q));
+  if (q) list = list.filter(f => (f.nome+' '+fullAddr(f)).toLowerCase().includes(q));
   if (ft === '__none') list = list.filter(f => !turnoById(f.turnoId)); else if (ft) list = list.filter(f => f.turnoId === ft);
   const pend = data.func.filter(f => f.endereco && !f.geo).length;
   $('#fKpis').innerHTML = `<span><b>${data.func.filter(f=>f.ativo!==false).length}</b> ativos</span><span><b>${data.func.filter(f=>f.ativo!==false&&(f.cnh==='pode'||f.cnh==='fixo')).length}</b> podem dirigir</span>` + (pend ? `<span><b>${pend}</b> sem localização</span>` : '');
@@ -677,7 +733,7 @@ function renderFunc(){
       <td><b>${esc(f.nome)}</b>${f.ativo===false?'<span class="sub">Inativo</span>':''}</td>
       <td>${t ? esc(t.nome) : '<span class="chip warn">Sem turno</span>'}</td>
       <td>${cnhChip(f)}</td>
-      <td>${esc(f.endereco)}${f.geo?`<span class="sub">${esc(f.geo.label)}</span>`:''}</td>
+      <td>${esc(f.endereco)}<span class="sub">${esc([f.bairro, f.cidade].filter(Boolean).join(' · '))}</span>${f.geo?`<span class="sub" title="Local encontrado no mapa">↳ ${esc(f.geo.label)}</span>`:''}</td>
       <td>${geoChip(f,'endereco')}</td>
       <td class="hide-sm mono">${esc(f.telefone||'')}</td>
       <td class="act"><button class="icon-btn" data-edit="${f.id}" aria-label="Editar ${esc(f.nome)}">✎</button><button class="icon-btn" data-del="${f.id}" aria-label="Excluir ${esc(f.nome)}">✕</button></td>
@@ -697,7 +753,7 @@ $('#fGeocode').addEventListener('click', async () => {
     for (const [i, o] of pend.entries()){
       const rest = Math.ceil((pend.length - i) * 1.3 / 60);
       btn.textContent = `Localizando ${i+1}/${pend.length}… (~${rest} min)`;
-      const g = await geocode(o.endereco);
+      const g = await geocodePerson(o);
       if (g){ ok++; buf.push({...o, geo:g}); } else fail++;
       if (buf.length >= 10) await flush();
     }
@@ -709,33 +765,53 @@ $('#fGeocode').addEventListener('click', async () => {
 
 /* Importação Excel */
 $('#fTemplate').addEventListener('click', () => {
-  const ws = XLSX.utils.aoa_to_sheet([['Nome','Endereço','Turno','Telefone','CNH'],['Maria da Silva','Rua das Palmeiras, 120, Centro, Garuva - SC',data.turno[0]?.nome||'1º turno','(47) 99999-0000','Sim'],['João Souza','Rua Blumenau, 45, Centro, Joinville - SC',data.turno[0]?.nome||'1º turno','','Não'],['Pedro Alves','Rua XV de Novembro, 900, Joinville - SC',data.turno[0]?.nome||'1º turno','','Fixo']]);
-  ws['!cols'] = [{wch:28},{wch:52},{wch:18},{wch:18},{wch:8}];
+  const t0 = data.turno[0]?.nome || 'Comercial';
+  const ws = XLSX.utils.aoa_to_sheet([['Nome','Endereço','Bairro','Cidade','Turno','Telefone','CNH'],
+    ['Maria da Silva','R. Porto Rico, 550','Floresta','Joinville',t0,'(47) 99999-0000','Sim'],
+    ['João Souza','-26.183, -48.9684','Pirabeiraba','Joinville',t0,'',''],
+    ['Pedro Alves','R. Raulino Foester, 96','Centro','Garuva',t0,'','Fixo']]);
+  ws['!cols'] = [{wch:28},{wch:34},{wch:18},{wch:14},{wch:16},{wch:18},{wch:8}];
   const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Funcionários'); XLSX.writeFile(wb, 'modelo-funcionarios.xlsx');
 });
 $('#fImport').addEventListener('change', async e => {
   const file = e.target.files[0]; e.target.value = ''; if (!file) return;
   try{
-    const wb = XLSX.read(await file.arrayBuffer());
+    const wb = /\.csv$/i.test(file.name) ? XLSX.read(await file.text(), {type:'string'}) : XLSX.read(await file.arrayBuffer());
     const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], {defval:''});
-    const norm = s => String(s).normalize('NFD').replace(/[̀-ͯ]/g,'').toLowerCase().trim();
-    const pick = (r, names) => { const k = Object.keys(r).find(k => names.includes(norm(k))); return k ? String(r[k]).trim() : ''; };
-    const existing = new Set(data.func.map(f => norm(f.nome)+'|'+norm(f.endereco)));
-    let semTurno = 0, dup = 0; const list = [];
+    const norm = s => String(s).normalize('NFD').replace(/[̀-ͯ]/g,'').toLowerCase().replace(/\s+/g,' ').trim();
+    const pick = (r, names) => { const k = Object.keys(r).find(k => names.includes(norm(k))); return k ? String(r[k]).replace(/\s+/g,' ').trim() : ''; };
+    const byName = new Map(data.func.map(f => [norm(f.nome), f]));
+    // turnos que ainda não existem são criados (com horários a conferir)
+    const novosTurnos = new Map();
+    rows.forEach(r => { const tn = pick(r, ['turno']); if (tn && !data.turno.some(t => norm(t.nome) === norm(tn)) && !novosTurnos.has(norm(tn))) novosTurnos.set(norm(tn), {id:uid(), nome:tn, entrada:'08:00', saida:'18:00', antecedencia:10, revisar:true}); });
+    if (novosTurnos.size) await Store.saveMany('turno', [...novosTurnos.values()]);
+    const turnoId = tn => { const n = norm(tn); return (data.turno.find(t => norm(t.nome) === n) || novosTurnos.get(n))?.id || ''; };
+    let novos = 0, atual = 0, semTurno = 0; const list = [], seen = new Set();
     rows.forEach(r => {
-      const nome = pick(r, ['nome','funcionario','colaborador']), endereco = pick(r, ['endereco','endereço','endereco de embarque']);
-      if (!nome) return;
-      if (existing.has(norm(nome)+'|'+norm(endereco))){ dup++; return; }
-      const tn = norm(pick(r, ['turno']));
-      const t = data.turno.find(t => norm(t.nome) === tn);
-      if (!t) semTurno++;
+      const nome = pick(r, ['nome','funcionario','colaborador']); if (!nome || seen.has(norm(nome))) return; seen.add(norm(nome));
+      const endereco = pick(r, ['endereco','endereco de embarque','rua','logradouro']).replace(/[\s,–-]+$/,'');
+      const bairro = pick(r, ['bairro']), cidade = pick(r, ['cidade','municipio']);
+      const tn = pick(r, ['turno']), tid = tn ? turnoId(tn) : '';
+      if (!tid) semTurno++;
       const cv = norm(pick(r, ['cnh','motorista','dirige','habilitado']));
-      const cnh = cv.startsWith('fix') ? 'fixo' : (['sim','s','x','yes','pode','1','true'].includes(cv) ? 'pode' : 'nao');
-      list.push({nome, endereco, turnoId: t ? t.id : '', telefone: pick(r, ['telefone','celular','fone']), cnh, ativo:true, geo: parseCoords(endereco)});
+      const cnh = cv.startsWith('fix') ? 'fixo' : (['sim','s','x','yes','pode','1','true','ok'].includes(cv) ? 'pode' : (['nao','n','no','0','false'].includes(cv) ? 'nao' : ''));
+      const old = byName.get(norm(nome));
+      const f = old ? {...old} : {ativo:true, cnh:'nao'};
+      const addrChanged = !old || norm(old.endereco) !== norm(endereco) || norm(old.bairro||'') !== norm(bairro) || norm(old.cidade||'') !== norm(cidade);
+      Object.assign(f, {nome, endereco, bairro, cidade});
+      if (tid) f.turnoId = tid; else if (!old) f.turnoId = '';
+      const tel = pick(r, ['telefone','celular','fone']); if (tel) f.telefone = tel; else if (!old) f.telefone = '';
+      if (cnh) f.cnh = cnh;
+      if (addrChanged) f.geo = parseCoords(endereco) ? {...parseCoords(endereco), prec:'numero'} : null;
+      delete f.exemplo;
+      old ? atual++ : novos++; list.push(f);
     });
-    if (!list.length){ toast(dup ? 'Todos os funcionários da planilha já estão cadastrados.' : 'Nenhuma linha com a coluna "Nome" foi encontrada.', 5000); return; }
+    if (!list.length){ toast('Nenhuma linha com a coluna "Nome" foi encontrada.', 5000); return; }
     await Store.saveMany('func', list);
-    toast(`${list.length} funcionário${list.length>1?'s':''} importado${list.length>1?'s':''}` + (dup?`, ${dup} repetido${dup>1?'s':''} ignorado${dup>1?'s':''}`:'') + (semTurno?`, ${semTurno} sem turno reconhecido`:'') + '. Clique em "Localizar endereços pendentes".', 7000);
+    const msg = [`${novos} novo${novos!==1?'s':''}, ${atual} atualizado${atual!==1?'s':''}`];
+    if (novosTurnos.size) msg.push(`turno${novosTurnos.size>1?'s':''} criado${novosTurnos.size>1?'s':''}: ${[...novosTurnos.values()].map(t=>t.nome).join(', ')} (confira os horários na aba Turnos)`);
+    if (semTurno) msg.push(`${semTurno} sem turno`);
+    toast(msg.join(' · ') + '. Agora clique em "Localizar endereços pendentes".', 9000);
   }catch(err){ toast('Não foi possível ler a planilha: ' + err.message, 6000); }
 });
 
@@ -768,7 +844,7 @@ $('#vTemplate').addEventListener('click', () => {
 $('#vImport').addEventListener('change', async e => {
   const file = e.target.files[0]; e.target.value = ''; if (!file) return;
   try{
-    const wb = XLSX.read(await file.arrayBuffer());
+    const wb = /\.csv$/i.test(file.name) ? XLSX.read(await file.text(), {type:'string'}) : XLSX.read(await file.arrayBuffer());
     const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], {defval:''});
     const norm = s => String(s).normalize('NFD').replace(/[̀-ͯ]/g,'').toLowerCase().trim();
     const pick = (r, names) => { const k = Object.keys(r).find(k => names.includes(norm(k))); return k ? String(r[k]).trim() : ''; };
@@ -806,7 +882,7 @@ function renderTurnos(){
     <thead><tr><th>Turno</th><th>Entrada</th><th>Saída</th><th class="num">Chegar antes</th><th class="num">Funcionários</th><th class="num">Com CNH</th><th class="num">Veículos</th><th class="num">Lugares</th><th></th></tr></thead>
     <tbody>${list.map(t => { const nf = data.func.filter(f=>f.turnoId===t.id && f.ativo!==false).length; const nc = data.func.filter(f=>f.turnoId===t.id && f.ativo!==false && (f.cnh==='pode'||f.cnh==='fixo')).length; const vs = vehiclesFor(t.id); const cap = vs.reduce((a,v)=>a+(+v.capacidade||0),0);
       return `<tr>
-      <td><b>${esc(t.nome)}</b></td><td class="mono">${esc(t.entrada)}</td><td class="mono">${esc(t.saida)}${t.saida<=t.entrada?' <span class="sub">dia seguinte</span>':''}</td>
+      <td><b>${esc(t.nome)}</b>${t.revisar?' <span class="chip warn">Conferir horários</span>':''}</td><td class="mono">${esc(t.entrada)}</td><td class="mono">${esc(t.saida)}${t.saida<=t.entrada?' <span class="sub">dia seguinte</span>':''}</td>
       <td class="num mono">${+t.antecedencia||0} min</td><td class="num mono">${nf}</td><td class="num">${nc<Math.min(vs.length,1)||(nf&&!nc)?'<span class="chip err">0</span>':`<span class="mono">${nc}</span>`}</td><td class="num mono">${vs.length}</td>
       <td class="num">${cap<nf?`<span class="chip err">${cap} — faltam ${nf-cap}</span>`:`<span class="mono">${cap}</span>`}</td>
       <td class="act"><button class="icon-btn" data-edit="${t.id}" aria-label="Editar ${esc(t.nome)}">✎</button><button class="icon-btn" data-del="${t.id}" aria-label="Excluir ${esc(t.nome)}">✕</button></td>
@@ -856,10 +932,12 @@ $('#cSave').addEventListener('click', async () => {
 const FORMS = {
   func:{title:'funcionário', fields:[
     {k:'nome', label:'Nome', type:'text', req:true, full:true},
-    {k:'endereco', label:'Endereço de embarque (rua, número, bairro, cidade) ou lat, lon', type:'text', req:true, full:true},
+    {k:'endereco', label:'Rua e número (ou coordenadas lat, lon)', type:'text', req:true, full:true},
+    {k:'bairro', label:'Bairro', type:'text'},
+    {k:'cidade', label:'Cidade', type:'text', def:'Joinville'},
     {k:'turnoId', label:'Turno', type:'turno'},
     {k:'telefone', label:'Telefone', type:'tel'},
-    {k:'cnh', label:'Direção', type:'select', def:'nao', options:[['nao','Não dirige'],['pode','Tem CNH (pode ser escolhido motorista)'],['fixo','Motorista fixo do turno']]},
+    {k:'cnh', label:'CNH / direção', type:'select', def:'nao', options:[['nao','Não informado / não dirige'],['pode','Tem CNH (pode ser escolhido motorista)'],['fixo','Motorista fixo do turno']]},
     {k:'veiculoFixo', label:'Carro do motorista fixo (opcional)', type:'veiculo'},
     {k:'ativo', label:'Ativo (usa o transporte)', type:'checkbox', def:true, full:true}
   ]},
@@ -903,11 +981,12 @@ function openForm(kind, obj){
     });
     delete out.exemplo;
     if (kind === 'func' && out.cnh !== 'fixo') out.veiculoFixo = '';
+    if (kind === 'turno') delete out.revisar;
     const btn = $('#dlgSave'); btn.disabled = true;
     try{
-      if (kind === 'func' && out.endereco && (out.endereco !== o.endereco || !o.geo)){
+      if (kind === 'func' && out.endereco && (out.endereco !== o.endereco || out.bairro !== o.bairro || out.cidade !== o.cidade || !o.geo)){
         $('#dlgMsg').textContent = 'Localizando endereço…';
-        try{ out.geo = await geocode(out.endereco); }
+        try{ out.geo = await geocodePerson(out); }
         catch(e){ out.geo = parseCoords(out.endereco); toast(e.message, 4500); }
         if (!out.geo) toast('Salvo, mas o endereço não foi encontrado. Revise ou use coordenadas (lat, lon).', 5000);
       }
@@ -958,7 +1037,46 @@ const planOf = turnoId => (data.plano||[]).find(p => p.id === turnoId);
 const funcById = id => data.func.find(f => f.id === id);
 const fmtDT = ms => ms ? new Intl.DateTimeFormat('pt-BR',{timeZone:TZ,day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}).format(new Date(ms)) : '';
 
+/* Escolha manual de motoristas por turno (lembrada neste navegador) */
+const DRV_KEY = 'rotSC.motoristas.v1';
+let drvSel = {}; try{ drvSel = JSON.parse(localStorage.getItem(DRV_KEY)) || {}; }catch{}
+const drvSelOf = tid => new Set(drvSel[tid] || []);
+function saveDrvSel(){ try{ localStorage.setItem(DRV_KEY, JSON.stringify(drvSel)); }catch{} }
+const drvMode = () => document.querySelector('input[name=drvMode]:checked')?.value || 'auto';
+document.querySelectorAll('input[name=drvMode]').forEach(r => r.addEventListener('change', () => {
+  const ts = selectedTurnos();
+  if (drvMode() === 'manual' && ts.length === 1 && !(drvSel[ts[0].id]||[]).length){
+    const P = planOf(ts[0].id); if (P){ drvSel[ts[0].id] = P.rotas.map(r => r.motoristaId); saveDrvSel(); }
+  }
+  renderPre();
+}));
+$('#drvSearch').addEventListener('input', () => renderDrvList());
+function renderDrvList(){
+  const ts = selectedTurnos(), manual = drvMode() === 'manual';
+  $('#drvPick').hidden = !manual; $('#fewerWrap').hidden = manual;
+  if (!manual) return;
+  if (ts.length !== 1){ $('#drvList').innerHTML = '<p class="hint" style="padding:8px 10px">Selecione um turno específico para escolher os motoristas.</p>'; $('#drvInfo').textContent = ''; return; }
+  const t = ts[0], co = cfg().geo, sel = drvSelOf(t.id), q = $('#drvSearch').value.trim().toLowerCase();
+  let emps = data.func.filter(f => f.ativo !== false && f.turnoId === t.id);
+  const dist = f => (f.geo && co) ? km(f.geo, co)/1.35 : -1;
+  emps.sort((a,b) => (sel.has(b.id) - sel.has(a.id)) || (dist(b) - dist(a)));
+  const shown = q ? emps.filter(f => (f.nome+' '+fullAddr(f)).toLowerCase().includes(q)) : emps;
+  $('#drvList').innerHTML = shown.map(f => `<label><input type="checkbox" value="${f.id}" ${sel.has(f.id)?'checked':''} ${f.geo?'':'disabled'}>
+    <span><b style="font-weight:600">${esc(f.nome)}</b>${canDrive(f)?' <span class="chip neutral">CNH</span>':''}<span class="sub">${esc([f.bairro, f.cidade].filter(Boolean).join(' · ') || f.endereco || '')}${f.geo?'':' · sem localização'}</span></span>
+    <span class="km">${f.geo && co ? Math.round(dist(f)) + ' km' : ''}</span></label>`).join('') || '<p class="hint" style="padding:8px 10px">Ninguém encontrado.</p>';
+  $('#drvList').querySelectorAll('input').forEach(i => i.addEventListener('change', () => {
+    const cur = drvSelOf(t.id); i.checked ? cur.add(i.value) : cur.delete(i.value);
+    drvSel[t.id] = [...cur]; saveDrvSel(); updDrvInfo();
+  }));
+  updDrvInfo();
+  function updDrvInfo(){
+    const n = drvSelOf(t.id).size, cars = vehiclesFor(t.id).sort((a,b)=>b.capacidade-a.capacidade);
+    const cap = cars.slice(0, n).reduce((a,v)=>a+(+v.capacidade||0),0), people = emps.filter(f=>f.geo).length;
+    $('#drvInfo').innerHTML = n ? `<b>${n}</b> motorista${n>1?'s':''} marcado${n>1?'s':''} · até <b>${cap}</b> lugares para ${people} pessoas${n > cars.length ? ` · <span style="color:var(--red)">só há ${cars.length} carros</span>` : cap < people ? ` · <span style="color:var(--amber)">${people-cap} ficarão sem rota</span>` : ''}. Os mais distantes da empresa aparecem primeiro.` : 'Marque quem vai dirigir. Os mais distantes da empresa aparecem primeiro.';
+  }
+}
 function renderPre(){
+  renderDrvList();
   const ts = selectedTurnos();
   const emps = data.func.filter(f => f.ativo !== false && ts.some(t => t.id === f.turnoId));
   const one = ts.length === 1;
@@ -1098,7 +1216,7 @@ function improve(routes){
     }
     // trocar o motorista por um passageiro com CNH do mesmo carro (quem mora mais na ponta)
     for (const r of routes){
-      if (r.driver.cnh === 'fixo') continue;
+      if (r.driver.cnh === 'fixo' || r.driverLocked) continue;
       let best = null;
       r.stops.forEach((p, i) => {
         if (!canDrive(p)) return;
@@ -1114,23 +1232,35 @@ function improve(routes){
   }
 }
 function rng(seed){ return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
-function planShift(emps, vehs, company, fewer){
+/* Dá a cada rota o menor carro em que todos cabem (as rotas mais cheias escolhem primeiro) */
+function fitCars(routes, cars){
+  const pool = cars.filter(c => !routes.some(r => r.carLocked && r.car && r.car.id === c.id)).sort((a,b) => (+a.capacidade||0) - (+b.capacidade||0));
+  routes.filter(r => !r.carLocked).sort((a,b) => b.stops.length - a.stops.length).forEach(r => {
+    const need = r.stops.length + 1;
+    let i = pool.findIndex(c => (+c.capacidade||0) >= need); if (i < 0) i = pool.length - 1;
+    if (i >= 0){ r.car = pool.splice(i, 1)[0]; r.cap = Math.max(0, (+r.car.capacidade||0) - 1); }
+  });
+}
+function planShift(emps, vehs, company, fewer, forced){
   const N = emps.length;
   const cars = vehs.slice().sort((a,b) => (+b.capacidade||0) - (+a.capacidade||0));
-  const cnh = emps.filter(canDrive), fixed = emps.filter(e => e.cnh === 'fixo');
+  if (!cars.length) return {routes:[], unassigned:emps.slice(), reason:'Nenhum carro disponível neste turno.'};
+  const forcedList = (forced || []).filter(f => f && f.geo);
+  const cnh = forcedList.length ? forcedList : emps.filter(canDrive);
+  const fixed = forcedList.length ? forcedList : emps.filter(e => e.cnh === 'fixo');
   const maxK = Math.min(cars.length, cnh.length, N);
-  if (!maxK) return {routes:[], unassigned:emps.slice(), reason: !cars.length ? 'Nenhum carro disponível neste turno.' : 'Nenhum funcionário com CNH neste turno.'};
+  if (!maxK) return {routes:[], unassigned:emps.slice(), reason:'Nenhum funcionário com CNH neste turno. Marque quem tem CNH ou escolha os motoristas manualmente.'};
   const topCap = k => cars.slice(0,k).reduce((a,v)=>a+(+v.capacidade||0),0);
-  let k = fewer ? Math.max(1, Math.min(fixed.length, maxK)) : maxK;
-  if (fewer) while (k < maxK && topCap(k) < N) k++;
+  let k = forcedList.length ? maxK : (fewer ? Math.max(1, Math.min(fixed.length, maxK)) : maxK);
+  if (fewer && !forcedList.length) while (k < maxK && topCap(k) < N) k++;
   let best = null;
   while (true){
-    for (let s = 0; s < 8; s++){
+    for (let s = 0; s < (forcedList.length ? 1 : 8); s++){
       const rand = rng(1000 + s*7919);
       const drivers = [], carsLeft = cars.slice();
       fixed.slice(0, k).forEach(f => {
         const ci = f.veiculoFixo ? carsLeft.findIndex(c => c.id === f.veiculoFixo) : -1;
-        drivers.push({e:f, car: ci >= 0 ? carsLeft.splice(ci,1)[0] : null, locked: ci >= 0});
+        drivers.push({e:f, car: ci >= 0 ? carsLeft.splice(ci,1)[0] : null, locked: ci >= 0, driverLocked: !!forcedList.length});
       });
       const pool = cnh.filter(c => !drivers.some(d => d.e === c));
       while (drivers.length < k && pool.length){
@@ -1139,7 +1269,7 @@ function planShift(emps, vehs, company, fewer){
         const idx = s === 0 ? 0 : Math.floor(rand() * Math.min(3, pool.length));
         drivers.push({e:pool.splice(idx,1)[0], car:null});
       }
-      const routes = drivers.map(d => ({driver:d.e, car:d.car, locked:!!d.locked, start:d.e.geo, end:company, stops:[], dir:'ida'}));
+      const routes = drivers.map(d => ({driver:d.e, car:d.car, carLocked:!!d.locked, driverLocked:!!d.driverLocked, start:d.e.geo, end:company, stops:[], dir:'ida'}));
       routes.filter(r => !r.car).sort((a,b) => km(b.start,company) - km(a.start,company)).forEach(r => { r.car = carsLeft.shift(); });
       routes.forEach(r => { r.cap = Math.max(0, (+r.car.capacidade||0) - 1); r.cost = routeCost(r); });
       const unassigned = [];
@@ -1152,9 +1282,10 @@ function planShift(emps, vehs, company, fewer){
       const total = routes.reduce((a,r)=>a+r.cost,0) + 1000*unassigned.length;
       if (!best || total < best.total) best = {routes, unassigned, total, k};
     }
-    if (best.unassigned.length && k < maxK){ k++; best = null; continue; }
+    if (!forcedList.length && best.unassigned.length && k < maxK){ k++; best = null; continue; }
     break;
   }
+  fitCars(best.routes, cars);
   return best;
 }
 
@@ -1198,11 +1329,12 @@ function occupants(R){ return 1 + (R.ida.ids||[]).length; }
 function capOf(R){ const v = data.veic.find(x => x.id === R.veiculoId); return +v?.capacidade || +R.cap || 0; }
 
 /* Montagem completa de um turno */
-async function buildPlan(t, step){
+async function buildPlan(t, step, forcedIds){
   const c = cfg(), company = c.geo;
   const emps = data.func.filter(f => f.ativo !== false && f.turnoId === t.id && f.geo);
-  const pl = emps.length ? planShift(emps, vehiclesFor(t.id), company, $('#rFewer').checked) : {routes:[], unassigned:[], reason:'Nenhum funcionário localizado neste turno.'};
-  const rotas = pl.routes.map((r, i) => ({key:uid(), veiculoId:r.car.id, cap:+r.car.capacidade, motoristaId:r.driver.id, motoristaManual:false, manual:false,
+  const forced = (forcedIds || []).map(funcById).filter(f => f && f.geo && emps.includes(f));
+  const pl = emps.length ? planShift(emps, vehiclesFor(t.id), company, $('#rFewer').checked, forced) : {routes:[], unassigned:[], reason:'Nenhum funcionário localizado neste turno.'};
+  const rotas = pl.routes.map((r, i) => ({key:uid(), veiculoId:r.car.id, cap:+r.car.capacidade, motoristaId:r.driver.id, motoristaManual:forced.includes(r.driver), manual:false,
     cor:ROUTE_COLORS[i % ROUTE_COLORS.length], ida:{ids:r.stops.map(f=>f.id)}, volta:{ids:bestOrder(company, r.driver.geo, r.stops.slice().reverse(), 'volta').map(f=>f.id)}}));
   for (const R of rotas){ await timeR(R, t); step(); }
   const P = {id:t.id, turnoId:t.id, geradoEm:Date.now(), geradoPor:user?.email || '', editadoEm:null, editadoPor:'', reason:pl.reason || '', rotas};
@@ -1213,16 +1345,25 @@ $('#runBtn').addEventListener('click', async () => {
   const c = cfg(), ts = selectedTurnos();
   if (!c.geo){ toast('Localize o endereço da empresa em Configurações.'); showTab('config'); return; }
   if (!ts.length){ toast('Cadastre pelo menos um turno.'); return; }
+  const manualMode = drvMode() === 'manual';
+  let forcedIds = null;
+  if (manualMode){
+    if (ts.length !== 1){ toast('Para escolher motoristas, selecione um turno específico.'); return; }
+    forcedIds = [...drvSelOf(ts[0].id)].filter(id => { const f = funcById(id); return f && f.geo && f.ativo !== false && f.turnoId === ts[0].id; });
+    if (!forcedIds.length){ toast('Marque pelo menos um motorista na lista.'); return; }
+    const nCars = vehiclesFor(ts[0].id).length;
+    if (forcedIds.length > nCars){ toast(`Você marcou ${forcedIds.length} motoristas, mas há só ${nCars} carro${nCars!==1?'s':''} disponíve${nCars!==1?'is':'l'} neste turno.`, 6000); return; }
+  }
   const saved = ts.filter(t => planOf(t.id));
   if (saved.length && !confirm(`Recalcular substitui as rotas salvas, inclusive os ajustes manuais, de: ${saved.map(t=>t.nome).join(', ')}.\n\nContinuar?`)) return;
-  await runBuild(ts);
+  await runBuild(ts, forcedIds);
 });
-async function runBuild(ts){
+async function runBuild(ts, forcedIds){
   busy = true; $('#runBtn').disabled = true; focusKey = null; viewTurno = 0;
   let total = 0; ts.forEach(t => { const es = data.func.filter(f=>f.ativo!==false&&f.turnoId===t.id&&f.geo); total += Math.max(1, Math.min(vehiclesFor(t.id).length, es.filter(canDrive).length)); });
   let done = 0; const step = () => { done++; $('#bar').style.width = Math.min(100, done/total*100) + '%'; };
   try{
-    for (const t of ts){ setStatus(`Montando ${t.nome}…`); await sleep(20); await buildPlan(t, step); }
+    for (const t of ts){ setStatus(`Montando ${t.nome}…`); await sleep(20); await buildPlan(t, step, forcedIds); }
     setStatus('Rotas salvas. Elas ficam fixas até alguém recalcular ou ajustar.');
   }catch(e){ console.error(e); setStatus(e.message || String(e), true); }
   busy = false; $('#runBtn').disabled = false; setTimeout(()=>{ $('#bar').style.width = '0'; }, 800);
@@ -1300,7 +1441,45 @@ const Edit = {
       const usedColors = new Set(P.rotas.map(r => r.cor));
       const R = {key:uid(), veiculoId:car.id, cap:+car.capacidade, motoristaId:fid, motoristaManual:true, manual:true,
         cor: ROUTE_COLORS.find(c => !usedColors.has(c)) || ROUTE_COLORS[P.rotas.length % ROUTE_COLORS.length], ida:{ids:[]}, volta:{ids:[]}};
-      P.rotas.push(R); return [R.key];
+      P.rotas.push(R); focusKey = R.key; return [R.key];
+    });
+  },
+  fill(turnoId, key){
+    editPlan(turnoId, 'Encaixando passageiros', P => {
+      const R = findR(P, key), co = cfg().geo, drv = funcById(R.motoristaId);
+      if (!drv?.geo) throw new Error('O motorista desta rota não tem endereço localizado.');
+      const used = new Set(P.rotas.flatMap(r => [r.motoristaId, ...(r.ida.ids||[])]));
+      const pool = data.func.filter(f => f.ativo !== false && f.turnoId === turnoId && f.geo && !used.has(f.id));
+      const usedCars = new Set(P.rotas.filter(r => r.key !== key).map(r => r.veiculoId));
+      const cars = vehiclesFor(turnoId).filter(v => !usedCars.has(v.id));
+      const maxCap = Math.max(0, ...cars.map(c => +c.capacidade||0));
+      if (!maxCap) throw new Error('Não há carro livre neste turno.');
+      const r = {start:drv.geo, end:co, dir:'ida', stops:(R.ida.ids||[]).map(funcById).filter(f => f && f.geo)};
+      r.cost = routeCost(r);
+      let added = 0;
+      while (r.stops.length + 1 < maxCap){
+        let best = null;
+        for (const pz of pool){
+          if (r.stops.includes(pz)) continue;
+          const alone = (1+W) * km(pz.geo, co);
+          for (let i = 0; i <= r.stops.length; i++){
+            r.stops.splice(i, 0, pz); const delta = routeCost(r) - r.cost; r.stops.splice(i, 1);
+            const ratio = delta / Math.max(alone, 0.5);
+            if (delta <= alone && (!best || ratio < best.ratio)) best = {pz, i, ratio};
+          }
+        }
+        if (!best) break;
+        r.stops.splice(best.i, 0, best.pz); r.cost = routeCost(r); added++;
+      }
+      twoOpt(r);
+      R.ida.ids = r.stops.map(f => f.id);
+      R.volta.ids = bestOrder(co, drv.geo, r.stops.slice().reverse(), 'volta').map(f => f.id);
+      const need = r.stops.length + 1;
+      const fit = cars.filter(c => +c.capacidade >= need).sort((a,b) => a.capacidade - b.capacidade)[0];
+      if (fit){ R.veiculoId = fit.id; R.cap = +fit.capacidade; }
+      R.manual = true;
+      if (!added) toast('Ninguém sem rota fica no caminho deste motorista. A ordem e o carro foram revistos.', 6000);
+      return [key];
     });
   },
   deleteRoute(turnoId, key){
@@ -1350,20 +1529,20 @@ function renderResults(){
       const drv = `<span class="n" style="background:${r.color}">M</span>`;
       const total = (d.arr - d.dep)/1000;
       const first = viewDir==='ida'
-        ? `<li>${drv}<div class="who2"><b>${esc(r.driver.nome)} sai de casa dirigindo</b><span>${esc(r.driver.endereco||'')}</span>${drvIssue?`<span class="chip err">${drvIssue}</span>`:''}</div><div class="t">${fmtTime(d.dep)}<small class="${onboardCls(total)}">${fmtDur(total)} ao volante</small></div><div></div></li>`
+        ? `<li>${drv}<div class="who2"><b>${esc(r.driver.nome)} sai de casa dirigindo</b><span>${esc(fullAddr(r.driver))}</span>${drvIssue?`<span class="chip err">${drvIssue}</span>`:''}</div><div class="t">${fmtTime(d.dep)}<small class="${onboardCls(total)}">${fmtDur(total)} ao volante</small></div><div></div></li>`
         : `<li><span class="n sq">CD</span><div class="who2"><b>Sai da empresa</b></div><div class="t">${fmtTime(d.dep)}</div><div></div></li>`;
       const last = viewDir==='ida'
         ? `<li><span class="n sq">CD</span><div class="who2"><b>Chega à empresa</b><span>${esc(t.nome)} entra ${t.entrada}</span></div><div class="t">${fmtTime(d.arr)}</div><div></div></li>`
-        : `<li>${drv}<div class="who2"><b>${esc(r.driver.nome)} chega em casa</b><span>${esc(r.driver.endereco||'')}</span></div><div class="t">${fmtTime(d.arr)}<small class="${onboardCls(total)}">${fmtDur(total)} ao volante</small></div><div></div></li>`;
+        : `<li>${drv}<div class="who2"><b>${esc(r.driver.nome)} chega em casa</b><span>${esc(fullAddr(r.driver))}</span></div><div class="t">${fmtTime(d.arr)}<small class="${onboardCls(total)}">${fmtDur(total)} ao volante</small></div><div></div></li>`;
       const rows = d.stops.map((s,i) => {
         const iss = personIssue(s.f, t);
         return `<li><span class="n" style="background:${r.color}">${i+1}</span>
-          <div class="who2"><b>${esc(s.f.nome)}</b><span>${esc(s.f.endereco||'')}</span>${iss?`<span class="chip err">${iss}</span>`:''}</div>
+          <div class="who2"><b>${esc(s.f.nome)}</b><span>${esc(fullAddr(s.f))}</span>${iss?`<span class="chip err">${iss}</span>`:''}</div>
           <div class="t">${fmtTime(s.at)}<small class="${onboardCls(s.onboard)}">${fmtDur(s.onboard)} a bordo</small></div>
           <div class="row-act">
             <button class="icon-btn" data-act="up" data-k="${key}" data-i="${i}" ${i===0?'disabled':''} aria-label="Subir ${esc(s.f.nome)}" title="Subir na ordem">↑</button>
             <button class="icon-btn" data-act="down" data-k="${key}" data-i="${i}" ${i===d.stops.length-1?'disabled':''} aria-label="Descer ${esc(s.f.nome)}" title="Descer na ordem">↓</button>
-            ${canDrive(s.f) && !iss ? `<button class="icon-btn" data-act="driver" data-k="${key}" data-f="${s.f.id}" title="Tornar motorista" aria-label="Tornar ${esc(s.f.nome)} motorista">M</button>` : ''}
+            ${!iss ? `<button class="icon-btn" data-act="driver" data-k="${key}" data-f="${s.f.id}" title="Tornar motorista${canDrive(s.f)?'':' (confirme a CNH)'}" aria-label="Tornar ${esc(s.f.nome)} motorista">M</button>` : ''}
             <select class="mini" data-act="move" data-k="${key}" data-f="${s.f.id}" aria-label="Mover ${esc(s.f.nome)}"><option value="">Mover…</option>${routeOpts(key)}<option value="none">Tirar da rota</option></select>
           </div></li>`;
       }).join('');
@@ -1382,17 +1561,18 @@ function renderResults(){
             ${freeCars.length ? `<select class="mini" data-act="car" data-k="${key}" aria-label="Trocar carro"><option value="">Trocar carro…</option>${freeCars.map(v=>`<option value="${v.id}">${esc(v.nome)} (${v.capacidade} lugares)</option>`).join('')}</select>` : ''}
           </div>
           <div class="btn-row">
+            ${p.unassigned.length ? `<button class="btn small accent" data-act="fill" data-k="${key}" type="button">Encaixar passageiros e escolher carro</button>` : ''}
             <button class="btn small" data-act="recalc" data-k="${key}" type="button">Recalcular esta rota</button>
             <button class="btn small" data-act="copy" data-k="${key}" type="button">Copiar para o motorista</button>
             <button class="btn small danger" data-act="del" data-k="${key}" type="button">Excluir rota</button>
           </div>
-          <p class="hint">Ajustes manuais mantêm a ordem que você definir e só recalculam os horários. "Recalcular esta rota" refaz a melhor ordem${r.motoristaManual||r.driver.cnh==='fixo'?'':' e o melhor motorista'} com as mesmas pessoas.</p></div>` : ''}
+          <p class="hint">"Encaixar passageiros" completa este carro com quem está sem rota e fica no caminho do motorista, define a ordem de ida e volta com as mesmas pessoas e troca para o menor carro livre em que todos cabem. Ajustes manuais mantêm a ordem que você definir e só recalculam os horários. "Recalcular esta rota" refaz a melhor ordem${r.motoristaManual||r.driver.cnh==='fixo'?'':' e o melhor motorista'} com as mesmas pessoas.</p></div>` : ''}
       </div>`;
     }).join('');
     const pool = p.unassigned.length ? `<div class="pool"><b>Sem rota (${p.unassigned.length})</b>
-      <ul>${p.unassigned.map(f => `<li><span>${esc(f.nome)}${canDrive(f)?' <span class="chip neutral">CNH</span>':''}<span class="sub">${esc(f.endereco||'')}</span></span>
+      <ul>${p.unassigned.map(f => `<li><span>${esc(f.nome)}${canDrive(f)?' <span class="chip neutral">CNH</span>':''}<span class="sub">${esc(fullAddr(f))}</span></span>
         <span class="row-act">${p.routes.length?`<select class="mini" data-act="place" data-f="${f.id}" aria-label="Colocar ${esc(f.nome)} em uma rota"><option value="">Colocar em…</option>${routeOpts(null)}</select>`:''}
-        ${canDrive(f)?`<button class="btn small" data-act="newroute" data-f="${f.id}" type="button">Nova rota dirigindo</button>`:''}</span></li>`).join('')}</ul></div>` : '';
+        <button class="btn small" data-act="newroute" data-f="${f.id}" type="button" title="${canDrive(f)?'Tem CNH':'Confirme a CNH antes'}">Nova rota dirigindo</button></span></li>`).join('')}</ul></div>` : '';
     const skipped = p.skipped.length ? `<div class="notice err"><b>${p.skipped.length} sem localização</b>: ${p.skipped.map(f=>esc(f.nome)).join(', ')}</div>` : '';
     const reason = (!p.routes.length && p.P.reason) ? `<div class="notice err"><b>${esc(p.P.reason)}</b></div>` : '';
     const meta = `Gerado em ${fmtDT(p.P.geradoEm)}${p.P.geradoPor?' por '+esc(p.P.geradoPor.split('@')[0]):''}${p.P.editadoEm?` · ajustado em ${fmtDT(p.P.editadoEm)}${p.P.editadoPor?' por '+esc(p.P.editadoPor.split('@')[0]):''}`:''}`;
@@ -1423,6 +1603,7 @@ function renderResults(){
       if (a === 'up' || a === 'down') Edit.reorder(T, k, viewDir, +n.dataset.i, a === 'up' ? -1 : 1);
       else if (a === 'driver') Edit.setDriver(T, k, fid);
       else if (a === 'recalc') Edit.recalcRoute(T, k);
+      else if (a === 'fill') Edit.fill(T, k);
       else if (a === 'del') Edit.deleteRoute(T, k);
       else if (a === 'newroute') Edit.newRoute(T, fid);
       else if (a === 'copy'){ const p = plan.find(x => x.turno.id === T); copyRoute(p, p.routes.find(r => r.key === k)); }
@@ -1440,7 +1621,7 @@ function drawMap(){
     data.func.filter(f => f.geo && f.ativo !== false && ts.some(t=>t.id===f.turnoId)).forEach(f => {
       const drive = canDrive(f), sz = drive ? 16 : 12;
       L.marker([f.geo.lat,f.geo.lon], {icon:L.divIcon({className:'', html:`<div class="mk dot" style="width:${sz}px;height:${sz}px;background:${drive?'#0f6b47':'#7d8a84'}"></div>`, iconSize:[sz,sz], iconAnchor:[sz/2,sz/2]}), zIndexOffset: drive?500:0})
-        .bindPopup(`<b>${esc(f.nome)}</b><br>${esc(turnoById(f.turnoId)?.nome||'')}${drive?' · tem CNH':''}<br>${esc(f.endereco)}`).addTo(layer);
+        .bindPopup(`<b>${esc(f.nome)}</b><br>${esc(turnoById(f.turnoId)?.nome||'')}${drive?' · tem CNH':''}<br>${esc(fullAddr(f))}`).addTo(layer);
       bounds.push([f.geo.lat,f.geo.lon]);
     });
   } else {
@@ -1462,7 +1643,7 @@ function drawMap(){
       if (focused) d.stops.forEach((s,i) => {
         if (!s.f.geo) return;
         L.marker([s.f.geo.lat,s.f.geo.lon], {icon:L.divIcon({className:'', html:`<div class="mk" style="background:${r.color}">${i+1}</div>`, iconSize:[24,24], iconAnchor:[12,12]})})
-          .bindPopup(`<b>${i+1}. ${esc(s.f.nome)}</b><br>${esc(s.f.endereco)}<br>${viewDir==='ida'?'Embarque':'Desembarque'} ${fmtTime(s.at)} · ${fmtDur(s.onboard)} a bordo<br><i>${esc(r.v.nome)} · ${esc(r.driver.nome)}</i>`).addTo(layer);
+          .bindPopup(`<b>${i+1}. ${esc(s.f.nome)}</b><br>${esc(fullAddr(s.f))}<br>${viewDir==='ida'?'Embarque':'Desembarque'} ${fmtTime(s.at)} · ${fmtDur(s.onboard)} a bordo<br><i>${esc(r.v.nome)} · ${esc(r.driver.nome)}</i>`).addTo(layer);
         bounds.push([s.f.geo.lat,s.f.geo.lon]);
       });
     });
@@ -1476,7 +1657,7 @@ function drawMap(){
 function copyRoute(p, r){
   const L1 = [`*${r.v.nome}${r.v.placa?' ('+r.v.placa+')':''} · ${p.turno.nome}*`, `Motorista: ${r.driver.nome}`, '',
     `*IDA* – sair de casa às ${fmtTime(r.ida.dep)}`];
-  r.ida.stops.forEach((s,i) => L1.push(`${i+1}. ${fmtTime(s.at)} – ${s.f.nome} – ${s.f.endereco}`));
+  r.ida.stops.forEach((s,i) => L1.push(`${i+1}. ${fmtTime(s.at)} – ${s.f.nome} – ${fullAddr(s.f)}`));
   L1.push(`Chegada na empresa: ${fmtTime(r.ida.arr)}`, '', `*VOLTA* – sair da empresa às ${fmtTime(r.volta.dep)}`);
   r.volta.stops.forEach((s,i) => L1.push(`${i+1}. ${fmtTime(s.at)} – ${s.f.nome}`));
   L1.push(`Chegada em casa: ${fmtTime(r.volta.arr)}`);
@@ -1496,13 +1677,13 @@ $('#exportPlan').addEventListener('click', () => {
   plan.forEach(p => {
     p.routes.forEach(r => {
       resumo.push([p.turno.nome, r.v.nome, r.v.placa||'', r.driver.nome, r.driver.telefone||'', r.ida.stops.length+1, +r.v.capacidade, fmtTime(r.ida.dep), fmtTime(r.ida.arr), +(r.ida.meters/1000).toFixed(1), fmtTime(r.volta.dep), fmtTime(r.volta.arr), +(r.volta.meters/1000).toFixed(1), r.manual?'Sim':'']);
-      ida.push([p.turno.nome, r.v.nome, r.driver.nome, 'Motorista', r.driver.nome, r.driver.endereco||'', r.driver.telefone||'', 'Sai '+fmtTime(r.ida.dep), Math.round((r.ida.arr-r.ida.dep)/60000)]);
-      r.ida.stops.forEach((s,i) => ida.push([p.turno.nome, r.v.nome, r.driver.nome, i+1, s.f.nome, s.f.endereco||'', s.f.telefone||'', fmtTime(s.at), Math.round(s.onboard/60)]));
-      r.volta.stops.forEach((s,i) => volta.push([p.turno.nome, r.v.nome, r.driver.nome, i+1, s.f.nome, s.f.endereco||'', s.f.telefone||'', fmtTime(s.at), Math.round(s.onboard/60)]));
-      volta.push([p.turno.nome, r.v.nome, r.driver.nome, 'Motorista', r.driver.nome, r.driver.endereco||'', r.driver.telefone||'', 'Chega '+fmtTime(r.volta.arr), Math.round((r.volta.arr-r.volta.dep)/60000)]);
+      ida.push([p.turno.nome, r.v.nome, r.driver.nome, 'Motorista', r.driver.nome, fullAddr(r.driver), r.driver.telefone||'', 'Sai '+fmtTime(r.ida.dep), Math.round((r.ida.arr-r.ida.dep)/60000)]);
+      r.ida.stops.forEach((s,i) => ida.push([p.turno.nome, r.v.nome, r.driver.nome, i+1, s.f.nome, fullAddr(s.f), s.f.telefone||'', fmtTime(s.at), Math.round(s.onboard/60)]));
+      r.volta.stops.forEach((s,i) => volta.push([p.turno.nome, r.v.nome, r.driver.nome, i+1, s.f.nome, fullAddr(s.f), s.f.telefone||'', fmtTime(s.at), Math.round(s.onboard/60)]));
+      volta.push([p.turno.nome, r.v.nome, r.driver.nome, 'Motorista', r.driver.nome, fullAddr(r.driver), r.driver.telefone||'', 'Chega '+fmtTime(r.volta.arr), Math.round((r.volta.arr-r.volta.dep)/60000)]);
     });
-    p.unassigned.forEach(f => sem.push([p.turno.nome, f.nome, f.endereco, 'Fora das rotas salvas']));
-    p.skipped.forEach(f => sem.push([p.turno.nome, f.nome, f.endereco, 'Endereço não localizado']));
+    p.unassigned.forEach(f => sem.push([p.turno.nome, f.nome, fullAddr(f), 'Fora das rotas salvas']));
+    p.skipped.forEach(f => sem.push([p.turno.nome, f.nome, fullAddr(f), 'Endereço não localizado']));
   });
   const wb = XLSX.utils.book_new();
   [['Resumo',resumo],['Ida',ida],['Volta',volta]].forEach(([n,a]) => XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(a), n));
