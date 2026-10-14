@@ -165,6 +165,19 @@ pre.code{margin:0;padding:10px;background:var(--surface-2);border-radius:6px;fon
 .itin .t{font:600 13.5px var(--font-mono);text-align:right}
 .itin .t small{display:block;font-weight:400;font-size:11px;color:var(--muted)}
 .long{color:var(--amber)} .vlong{color:var(--red)}
+.itin li{grid-template-columns:24px 1fr auto}
+.itin .row-act{grid-column:2 / -1;display:flex;flex-wrap:wrap;gap:4px;align-items:center}
+.itin .row-act:empty{display:none}
+.itin li > div:empty{display:none}
+.row-act .icon-btn{width:26px;height:26px;border:1px solid var(--line);font-weight:700;font-size:12px}
+.row-act .icon-btn:disabled{opacity:.35;cursor:default}
+select.mini{width:auto;min-width:0;max-width:100%;padding:3px 6px;font-size:12.5px;border-radius:5px}
+.edit-row{display:flex;flex-wrap:wrap;gap:6px;padding-top:4px}
+.pool{border:1px dashed var(--red);border-radius:var(--radius);padding:8px 10px;background:var(--red-soft);font-size:13.5px}
+.pool ul{list-style:none;margin:6px 0 0;padding:0;display:flex;flex-direction:column;gap:6px}
+.pool li{display:flex;flex-wrap:wrap;justify-content:space-between;gap:6px;align-items:center;border-top:1px solid color-mix(in srgb,var(--red) 20%,transparent);padding-top:6px}
+.pool li:first-child{border-top:0;padding-top:0}
+.pool .row-act{display:flex;gap:6px;flex-wrap:wrap}
 .map-wrap{position:relative;min-width:0}
 #map{position:absolute;inset:0;background:var(--surface-2)}
 #map.dark-tiles .leaflet-tile-pane{filter:invert(1) hue-rotate(180deg) brightness(.85) contrast(.9)}
@@ -222,18 +235,14 @@ dialog::backdrop{background:rgb(10 20 15 / .45)}
     <aside class="panel">
       <div class="block">
         <h3>Planejamento</h3>
-        <div class="row2">
-          <label class="field">Turno
-            <select id="rTurno"></select>
-          </label>
-          <label class="field">Data
-            <input type="date" id="rDate">
-          </label>
-        </div>
+        <label class="field">Turno
+          <select id="rTurno"></select>
+        </label>
         <div class="pre-sum" id="preSum"></div>
         <div id="preWarn"></div>
         <label class="check"><input type="checkbox" id="rFewer" checked> <span>Usar o menor número de carros possível<br><span class="hint">Desmarcado, usa todos os carros com motorista disponível e reduz o tempo a bordo.</span></span></label>
         <button class="btn primary" id="runBtn" type="button">Montar rotas</button>
+        <p class="hint" id="runHint"></p>
         <div class="progress" aria-hidden="true"><span id="bar"></span></div>
         <div class="status" id="status" role="status"></div>
       </div>
@@ -245,7 +254,7 @@ dialog::backdrop{background:rgb(10 20 15 / .45)}
             <button type="button" id="vVolta" aria-pressed="false">Volta</button>
           </div>
         </div>
-        <div id="results"><div class="empty">Escolha o turno e a data e clique em <b>Montar rotas</b>. Os funcionários são divididos entre os carros disponíveis, respeitando a capacidade, e cada rota sai da casa do motorista.</div></div>
+        <div id="results"></div>
         <div class="btn-row" id="resActions" hidden>
           <button class="btn small" id="exportPlan" type="button">Exportar Excel</button>
         </div>
@@ -254,7 +263,6 @@ dialog::backdrop{background:rgb(10 20 15 / .45)}
     <div class="map-wrap">
       <div id="map" role="application" aria-label="Mapa de Santa Catarina"></div>
       <div class="map-tools">
-        <button class="btn" id="trafficBtn" type="button" aria-pressed="false">Trânsito agora</button>
         <button class="btn" id="showAllBtn" type="button" hidden>Mostrar todas as rotas</button>
       </div>
     </div>
@@ -317,7 +325,7 @@ dialog::backdrop{background:rgb(10 20 15 / .45)}
       <div id="modeNotice"></div>
       <div class="cards">
         <div class="card">
-          <h3>Empresa (destino da ida)</h3>
+          <h3>Empresa (destino da ida e origem da volta)</h3>
           <label class="field">Nome<input type="text" id="cNome"></label>
           <label class="field">Endereço ou coordenadas<input type="text" id="cEnd"></label>
           <span class="hint" id="cGeo"></span>
@@ -331,9 +339,17 @@ dialog::backdrop{background:rgb(10 20 15 / .45)}
           <label class="check"><input type="checkbox" id="cRegion"> <span>Buscar endereços só em SC e na divisa com o PR</span></label>
         </div>
         <div class="card">
-          <h3>API de rotas (TomTom)</h3>
-          <label class="field">Chave da API<input type="password" id="cKey" autocomplete="off" placeholder="Cole a chave aqui"></label>
-          <p class="hint">Crie grátis em developer.tomtom.com (2.500 consultas/dia). Fica salva para toda a equipe. Restrinja a chave ao domínio do site no painel da TomTom.</p>
+          <h3>Estimativa de trânsito</h3>
+          <p class="hint">O tempo de cada trecho sem trânsito vem do OpenStreetMap. O sistema acrescenta estes percentuais conforme o horário em que o carro está rodando.</p>
+          <div class="row2">
+            <label class="field">Pico da manhã<span style="display:flex;gap:6px"><input type="time" id="cPm1"><input type="time" id="cPm2"></span></label>
+            <label class="field">Pico da tarde<span style="display:flex;gap:6px"><input type="time" id="cPt1"><input type="time" id="cPt2"></span></label>
+          </div>
+          <div class="row2">
+            <label class="field">Acréscimo no pico (%)<input type="number" id="cTfPico" min="0" max="200" step="5"></label>
+            <label class="field">Acréscimo fora do pico (%)<input type="number" id="cTfNormal" min="0" max="200" step="5"></label>
+          </div>
+          <label class="field">Acréscimo de madrugada, 22h às 5h (%)<input type="number" id="cTfNoite" min="0" max="200" step="5"></label>
         </div>
       </div>
       <div class="btn-row"><button class="btn accent" id="cSave" type="button">Salvar configurações</button></div>
@@ -376,12 +392,13 @@ const ALLOWED_DOMAIN = 'grupotbx.com.br';
 const $ = s => document.querySelector(s);
 const TZ = 'America/Sao_Paulo';
 const REGION = {topLeft:'-25.30,-54.00', btmRight:'-29.50,-48.20'};
-const COL = {func:'rot_funcionarios', veic:'rot_veiculos', turno:'rot_turnos', config:'rot_config'};
+const COL = {func:'rot_funcionarios', veic:'rot_veiculos', turno:'rot_turnos', config:'rot_config', plano:'rot_planos'};
 const ROUTE_COLORS = ['#1f77b4','#d62728','#2ca02c','#9467bd','#ff7f0e','#17becf','#8c564b','#e377c2','#bcbd22','#393b79','#637939','#843c39'];
 const useFirebase = !!(FIREBASE_CONFIG.apiKey && !FIREBASE_CONFIG.apiKey.startsWith('COLE'));
 
-const data = {func:[], veic:[], turno:[], config:{}};
-const DEFAULT_CONFIG = {nome:'Grupo TBX', endereco:'Garuva, SC', geo:null, dwell:2, after:10, region:true, tomtomKey:''};
+const data = {func:[], veic:[], turno:[], plano:[], config:{}};
+const DEFAULT_CONFIG = {nome:'Tubrax', endereco:'Estrada Três Barras, 8725, Garuva - SC', geo:null, dwell:2, after:10, region:true,
+  pm1:'06:00', pm2:'08:30', pt1:'16:30', pt2:'19:00', tfPico:30, tfNormal:10, tfNoite:0};
 let user = null;
 
 /* ---------------- Utilidades ---------------- */
@@ -452,13 +469,14 @@ const Local = {
   init(){
     let d = null; try{ d = JSON.parse(localStorage.getItem(LOCAL_KEY)); }catch{}
     if (!d) d = exampleData();
-    Object.assign(data, {func:d.func||[], veic:d.veic||[], turno:d.turno||[], config:d.config||{}});
+    Object.assign(data, {func:d.func||[], veic:d.veic||[], turno:d.turno||[], plano:d.plano||[], config:d.config||{}});
     this.persist(); renderAll();
   },
   persist(){ try{ localStorage.setItem(LOCAL_KEY, JSON.stringify(data)); }catch{} },
   async save(kind, obj){ if (!obj.id) obj.id = uid(); const arr = data[kind]; const i = arr.findIndex(x=>x.id===obj.id); if (i>=0) arr[i] = obj; else arr.push(obj); this.persist(); renderAll(); },
   async saveMany(kind, list){ list.forEach(o => { if (!o.id) o.id = uid(); const i = data[kind].findIndex(x=>x.id===o.id); if (i>=0) data[kind][i]=o; else data[kind].push(o); }); this.persist(); renderAll(); },
   async remove(kind, id){ data[kind] = data[kind].filter(x => x.id !== id); this.persist(); renderAll(); },
+  async put(kind, obj){ return this.save(kind, obj); },
   async setConfig(patch){ data.config = Object.assign({}, data.config, patch); this.persist(); renderAll(); }
 };
 const Fire = {
@@ -480,7 +498,7 @@ const Fire = {
   },
   subscribe(){
     this.db = firebase.firestore();
-    const map = {func:COL.func, veic:COL.veic, turno:COL.turno};
+    const map = {func:COL.func, veic:COL.veic, turno:COL.turno, plano:COL.plano};
     Object.entries(map).forEach(([kind, col]) => {
       this.db.collection(col).onSnapshot(snap => {
         data[kind] = snap.docs.map(d => ({id:d.id, ...d.data()}));
@@ -514,6 +532,7 @@ const Fire = {
     }
   },
   async remove(kind, id){ await this.db.collection(COL[kind]).doc(id).delete(); },
+  async put(kind, obj){ await this.db.collection(COL[kind]).doc(obj.id).set(this.clean(obj)); },
   async setConfig(patch){ await this.db.collection(COL.config).doc('app').set(this.clean(patch), {merge:true}); }
 };
 const Store = useFirebase ? Fire : Local;
@@ -525,44 +544,79 @@ function renderWho(){
   $('#logout')?.addEventListener('click', () => firebase.auth().signOut());
 }
 
-/* ---------------- TomTom ---------------- */
-async function api(url){
+/* ---------------- Serviços abertos: Nominatim (endereços) e OSRM (rotas) ---------------- */
+async function fetchJSON(url){
   for (let attempt = 0; attempt < 4; attempt++){
-    const res = await fetch(url);
-    if (res.status === 429 || res.status === 503){ await sleep(900*(attempt+1)); continue; }
-    let body = null; try{ body = await res.json(); }catch{}
-    if (res.status === 403) throw new Error('A chave da TomTom foi recusada (403). Confira a chave em Configurações e as restrições de domínio no painel da TomTom.');
-    if (!res.ok){
-      const msg = body?.detailedError?.message || body?.error?.description || body?.errorText || `HTTP ${res.status}`;
-      throw new Error(typeof msg === 'string' ? msg : JSON.stringify(msg));
-    }
-    return body;
+    let res;
+    try{ res = await fetch(url, {headers:{'Accept':'application/json'}}); }
+    catch(e){ await sleep(1200*(attempt+1)); continue; }
+    if (res.status === 429 || res.status >= 500){ await sleep(1500*(attempt+1)); continue; }
+    if (!res.ok) throw new Error(`O serviço respondeu HTTP ${res.status}.`);
+    return res.json();
   }
-  throw new Error('Limite de consultas por segundo da TomTom atingido. Aguarde alguns segundos e tente de novo.');
+  throw new Error('O serviço gratuito de mapas está ocupado. Aguarde um minuto e tente de novo.');
+}
+let lastNom = 0;
+async function nominatim(q){
+  const wait = lastNom + 1100 - Date.now(); if (wait > 0) await sleep(wait);
+  lastNom = Date.now();
+  let url = `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&addressdetails=1&countrycodes=br&accept-language=pt-BR&q=${encodeURIComponent(q)}`;
+  if (cfg().region) url += '&viewbox=-54.0,-25.3,-48.2,-29.5&bounded=1';
+  const j = await fetchJSON(url);
+  return j && j[0];
 }
 async function geocode(text){
-  const c = parseCoords(text); if (c) return c;
-  const key = cfg().tomtomKey; if (!key) throw new Error('Configure a chave da TomTom em Configurações.');
-  let url = `https://api.tomtom.com/search/2/geocode/${encodeURIComponent(text)}.json?key=${encodeURIComponent(key)}&limit=1&countrySet=BR&language=pt-BR`;
-  if (cfg().region) url += `&topLeft=${REGION.topLeft}&btmRight=${REGION.btmRight}`;
-  const j = await api(url); await sleep(220);
-  const r = j.results && j.results[0];
-  if (!r) return null;
-  return {lat:r.position.lat, lon:r.position.lon, label:r.address?.freeformAddress || text, score: r.matchConfidence?.score ?? null, tipo: r.type || ''};
+  const c = parseCoords(text); if (c) return {...c, prec:'numero'};
+  const base = String(text).replace(/\s+-\s+/g, ', ').replace(/\s+/g,' ').trim();
+  const semNumero = base.replace(/(,\s*|\s+n[ºo°.]?\s*)\d+[A-Za-z]?(?=\s*(,|$))/i, '');
+  const parts = base.split(',').map(x=>x.trim()).filter(Boolean);
+  const tries = [[base,'numero'], [semNumero,'rua'], [parts.slice(1).join(', '),'bairro']];
+  const seen = new Set();
+  for (const [q, maxPrec] of tries){
+    if (!q || seen.has(q)) continue; seen.add(q);
+    const r = await nominatim(q); if (!r) continue;
+    const t = (r.addresstype || r.type || '').toLowerCase();
+    let prec = (r.address?.house_number || ['house','building'].includes(t)) ? 'numero'
+             : (r.category === 'highway' || r.class === 'highway' || ['road','street'].includes(t)) ? 'rua' : 'bairro';
+    const order = ['numero','rua','bairro'];
+    if (order.indexOf(prec) < order.indexOf(maxPrec)) prec = maxPrec;
+    const label = String(r.display_name || q).split(', ').slice(0, 4).join(', ');
+    return {lat:+r.lat, lon:+r.lon, label, prec};
+  }
+  return null;
 }
-async function routeTT(points, departDate){
-  const key = cfg().tomtomKey;
-  const locs = points.map(p => `${p.lat.toFixed(6)},${p.lon.toFixed(6)}`).join(':');
-  const p = new URLSearchParams({key, traffic:'true', routeType:'fastest', travelMode:'car', computeTravelTimeFor:'all', departAt: isoAt(departDate), language:'pt-BR'});
-  const j = await api(`https://api.tomtom.com/routing/1/calculateRoute/${locs}/json?${p}`);
-  await sleep(220);
-  const r = j.routes && j.routes[0]; if (!r) throw new Error('A TomTom não encontrou rota entre esses pontos.');
-  const line = []; r.legs.forEach(l => l.points.forEach(pt => line.push([pt.latitude, pt.longitude])));
-  return {legs: r.legs.map(l => l.summary), line, travel: r.summary.travelTimeInSeconds, meters: r.summary.lengthInMeters,
-          free: r.summary.noTrafficTravelTimeInSeconds ?? r.summary.travelTimeInSeconds};
+const OSRM = ['https://router.project-osrm.org', 'https://routing.openstreetmap.de/routed-car'];
+async function routeOSRM(points){
+  const coords = points.map(p => `${p.lon.toFixed(6)},${p.lat.toFixed(6)}`).join(';');
+  let lastErr;
+  for (const base of OSRM){
+    try{
+      const j = await fetchJSON(`${base}/route/v1/driving/${coords}?overview=simplified&geometries=geojson&steps=false`);
+      if (j.code !== 'Ok' || !j.routes?.length) throw new Error('Rota não encontrada entre esses pontos.');
+      const r = j.routes[0];
+      await sleep(400);
+      return {legs: r.legs.map(l => ({duration:l.duration, distance:l.distance})), line: r.geometry.coordinates.map(c => [c[1], c[0]]), meters: r.distance};
+    }catch(e){ lastErr = e; }
+  }
+  throw lastErr || new Error('Não foi possível calcular a rota.');
 }
-function isoAt(date){
-  return new Intl.DateTimeFormat('sv-SE',{timeZone:TZ,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'}).format(date).replace(' ','T') + '-03:00';
+/* Estimativa de trânsito por faixa de horário */
+const minOfDay = d => { const [h,m] = new Intl.DateTimeFormat('en-GB',{timeZone:TZ,hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(d).split(':'); return (+h)*60 + (+m); };
+const hm = s => { const [h,m] = String(s||'0:0').split(':'); return (+h)*60 + (+m||0); };
+function trafficPct(d){
+  const c = cfg(), m = minOfDay(d);
+  if (m >= 22*60 || m < 5*60) return +c.tfNoite || 0;
+  if ((m >= hm(c.pm1) && m < hm(c.pm2)) || (m >= hm(c.pt1) && m < hm(c.pt2))) return +c.tfPico || 0;
+  return +c.tfNormal || 0;
+}
+function schedule(legs, startMs, dwellS, nStops){
+  let t = startMs, travel = 0, free = 0; const arrivals = [];
+  legs.forEach((l, i) => {
+    const dur = l.duration * (1 + trafficPct(new Date(t))/100);
+    t += dur*1000; travel += dur; free += l.duration; arrivals.push(new Date(t));
+    if (i < nStops) t += dwellS*1000;
+  });
+  return {arrivals, end:t, travel, free};
 }
 
 /* ---------------- Abas ---------------- */
@@ -581,7 +635,7 @@ function renderAll(){
   $('#cVeic').textContent = data.veic.length || '';
   $('#cTurno').textContent = data.turno.length || '';
   renderTurnoSelects(); renderFunc(); renderVeic(); renderTurnos(); renderConfig(); renderPre();
-  if (currentTab === 'rotas' && !plan) drawMap();
+  refreshPlan();
 }
 function turnoOptions(sel, withAll, allLabel){
   const ts = data.turno.slice().sort((a,b)=> (a.entrada||'').localeCompare(b.entrada||''));
@@ -600,8 +654,8 @@ function renderTurnoSelects(){
 function geoChip(o, addrKey){
   if (!o[addrKey]) return '<span class="chip neutral">Sem endereço</span>';
   if (!o.geo) return '<span class="chip err">Não localizado</span>';
-  if (o.geo.score != null && o.geo.score < 0.7) return '<span class="chip warn" title="A busca encontrou um local aproximado. Confira o endereço.">Aproximado</span>';
-  if (o.geo.tipo && /Geography/i.test(o.geo.tipo)) return '<span class="chip warn" title="Localizado só pela cidade ou bairro. Inclua rua e número.">Só cidade/bairro</span>';
+  if (o.geo.prec === 'bairro') return '<span class="chip warn" title="Encontrado só pelo bairro ou cidade. Confira a rua ou use coordenadas (lat, lon).">Só bairro/cidade</span>';
+  if (o.geo.prec === 'rua') return '<span class="chip ok" title="Encontrado pela rua, sem o número exato.">Rua</span>';
   return '<span class="chip ok">Localizado</span>';
 }
 function cnhChip(f){
@@ -637,18 +691,20 @@ $('#fNew').addEventListener('click', () => openForm('func', null));
 $('#fGeocode').addEventListener('click', async () => {
   const pend = data.func.filter(f => f.endereco && !f.geo);
   if (!pend.length){ toast('Todos os endereços já estão localizados.'); return; }
-  if (!cfg().tomtomKey){ toast('Configure a chave da TomTom em Configurações.'); return; }
-  const btn = $('#fGeocode'); btn.disabled = true; let ok = 0, fail = 0;
-  const outF = [], outV = [];
-  for (const [i, o] of pend.entries()){
-    btn.textContent = `Localizando ${i+1}/${pend.length}…`;
-    try{ const g = await geocode(o.endereco); if (g){ ok++; const c = {...o, geo:g}; delete c._veic; (o._veic ? outV : outF).push(c); } else fail++; }
-    catch(e){ toast(e.message, 5000); break; }
-  }
-  if (outF.length) await Store.saveMany('func', outF);
-  if (outV.length) await Store.saveMany('veic', outV);
+  const btn = $('#fGeocode'); btn.disabled = true; let ok = 0, fail = 0, buf = [];
+  const flush = async () => { if (buf.length){ const b = buf; buf = []; await Store.saveMany('func', b); } };
+  try{
+    for (const [i, o] of pend.entries()){
+      const rest = Math.ceil((pend.length - i) * 1.3 / 60);
+      btn.textContent = `Localizando ${i+1}/${pend.length}… (~${rest} min)`;
+      const g = await geocode(o.endereco);
+      if (g){ ok++; buf.push({...o, geo:g}); } else fail++;
+      if (buf.length >= 10) await flush();
+    }
+  }catch(e){ toast(e.message, 5000); }
+  await flush();
   btn.disabled = false; btn.textContent = 'Localizar endereços pendentes';
-  toast(`${ok} localizado${ok===1?'':'s'}` + (fail ? `, ${fail} não encontrado${fail===1?'':'s'} (revise o endereço)` : '.'), 4500);
+  toast(`${ok} localizado${ok===1?'':'s'}` + (fail ? `, ${fail} não encontrado${fail===1?'':'s'}. Revise o endereço ou use coordenadas (lat, lon).` : '.'), 6000);
 });
 
 /* Importação Excel */
@@ -768,23 +824,28 @@ function renderConfig(){
   const c = cfg();
   if (document.activeElement?.closest('#tab-config')) return;
   $('#cNome').value = c.nome || ''; $('#cEnd').value = c.endereco || '';
-  $('#cDwell').value = c.dwell; $('#cAfter').value = c.after; $('#cRegion').checked = !!c.region; $('#cKey').value = c.tomtomKey || '';
-  $('#cGeo').innerHTML = c.geo ? `✓ ${esc(c.geo.label)}` : '<span style="color:var(--red)">Endereço da empresa ainda não localizado. Salve com a chave da TomTom preenchida.</span>';
+  $('#cDwell').value = c.dwell; $('#cAfter').value = c.after; $('#cRegion').checked = !!c.region;
+  $('#cPm1').value = c.pm1; $('#cPm2').value = c.pm2; $('#cPt1').value = c.pt1; $('#cPt2').value = c.pt2;
+  $('#cTfPico').value = c.tfPico; $('#cTfNormal').value = c.tfNormal; $('#cTfNoite').value = c.tfNoite;
+  $('#cGeo').innerHTML = c.geo ? `✓ ${esc(c.geo.label)}` : '<span style="color:var(--red)">Endereço da empresa ainda não localizado. Clique em Salvar configurações.</span>';
   $('#modeNotice').innerHTML = useFirebase ? '' : `<div class="notice"><b>Modo local.</b> Os dados ficam só neste navegador e há exemplos carregados para teste. Para compartilhar com a equipe, cole o <span class="mono">firebaseConfig</span> do seu projeto no início do arquivo HTML. ${data.func.some(f=>f.exemplo)||data.veic.some(v=>v.exemplo)?'<button class="btn small" id="clearEx" type="button" style="margin-top:8px">Remover dados de exemplo</button>':''}</div>`;
   $('#clearEx')?.addEventListener('click', () => {
-    data.func = data.func.filter(x=>!x.exemplo); data.veic = data.veic.filter(x=>!x.exemplo); data.turno = data.turno.filter(x=>!x.exemplo);
+    data.func = data.func.filter(x=>!x.exemplo); data.veic = data.veic.filter(x=>!x.exemplo); data.turno = data.turno.filter(x=>!x.exemplo); data.plano = [];
     Local.persist(); plan = null; renderAll(); toast('Exemplos removidos.');
   });
 }
 $('#cSave').addEventListener('click', async () => {
   const btn = $('#cSave'); btn.disabled = true;
-  const patch = {nome:$('#cNome').value.trim(), endereco:$('#cEnd').value.trim(), dwell:+$('#cDwell').value||0, after:+$('#cAfter').value||0, region:$('#cRegion').checked, tomtomKey:$('#cKey').value.trim()};
+  const patch = {nome:$('#cNome').value.trim(), endereco:$('#cEnd').value.trim(), dwell:+$('#cDwell').value||0, after:+$('#cAfter').value||0, region:$('#cRegion').checked,
+    pm1:$('#cPm1').value||'06:00', pm2:$('#cPm2').value||'08:30', pt1:$('#cPt1').value||'16:30', pt2:$('#cPt2').value||'19:00',
+    tfPico:+$('#cTfPico').value||0, tfNormal:+$('#cTfNormal').value||0, tfNoite:+$('#cTfNoite').value||0};
   const c = cfg();
   try{
     if (patch.endereco && (patch.endereco !== c.endereco || !c.geo)){
-      data.config.tomtomKey = patch.tomtomKey; data.config.region = patch.region;
+      data.config.region = patch.region;
       patch.geo = await geocode(patch.endereco);
-      if (!patch.geo) toast('Endereço da empresa não encontrado. Tente rua, número e cidade, ou coordenadas.', 5000);
+      if (!patch.geo) toast('Endereço da empresa não encontrado. Use as coordenadas do portão (lat, lon), copiadas do Google Maps.', 6000);
+      else if (patch.geo.prec !== 'numero') toast('Endereço da empresa encontrado de forma aproximada. Para precisão, use as coordenadas do portão (lat, lon).', 7000);
     }
     await Store.setConfig(patch); toast('Configurações salvas.');
   }catch(e){ toast(e.message, 5000); await Store.setConfig(patch); }
@@ -870,37 +931,33 @@ const isDark = () => { const t = document.documentElement.getAttribute('data-the
 let baseLayer;
 function setBase(){
   if (!baseLayer) baseLayer = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-    {maxZoom:19, attribution:'&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> | Rotas &copy; TomTom'}).addTo(map);
+    {maxZoom:19, attribution:'&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> | Rotas OSRM · Endereços Nominatim'}).addTo(map);
   map.getContainer().classList.toggle('dark-tiles', isDark());
 }
 setBase(); darkMq.addEventListener?.('change', setBase);
 const layer = L.layerGroup().addTo(map);
-let trafficLayer = null;
-$('#trafficBtn').addEventListener('click', () => {
-  const b = $('#trafficBtn');
-  if (trafficLayer){ map.removeLayer(trafficLayer); trafficLayer = null; b.setAttribute('aria-pressed','false'); return; }
-  const key = cfg().tomtomKey; if (!key){ toast('Configure a chave da TomTom em Configurações.'); return; }
-  trafficLayer = L.tileLayer(`https://api.tomtom.com/traffic/map/4/tile/flow/relative0/{z}/{x}/{y}.png?key=${encodeURIComponent(key)}`, {maxZoom:18, opacity:.85}).addTo(map);
-  b.setAttribute('aria-pressed','true');
-});
 const icon = (html, cls, w=24, h=24) => L.divIcon({className:'', html:`<div class="mk ${cls}">${html}</div>`, iconSize:[w,h], iconAnchor:[w/2,h/2]});
 
-/* ---------------- Planejamento ---------------- */
-let plan = null, viewDir = 'ida', viewTurno = 0, focusVeh = null;
-$('#rDate').value = addDays(ymd(new Date()), 1);
-$('#rTurno').addEventListener('change', () => { plan = null; renderPre(); renderResults(); drawMap(); });
-$('#rDate').addEventListener('change', () => { plan = null; renderResults(); });
+/* ---------------- Planejamento ----------------
+   As rotas de cada turno ficam salvas (coleção rot_planos, um documento por turno) e só mudam
+   quando alguém recalcula ou faz um ajuste manual. */
+let plan = null, viewDir = 'ida', viewTurno = 0, focusKey = null, busy = false, lastFit = '';
+$('#rTurno').addEventListener('change', () => { focusKey = null; viewTurno = 0; refreshPlan(); });
 $('#vIda').addEventListener('click', () => setDir('ida'));
 $('#vVolta').addEventListener('click', () => setDir('volta'));
 function setDir(d){ viewDir = d; $('#vIda').setAttribute('aria-pressed', String(d==='ida')); $('#vVolta').setAttribute('aria-pressed', String(d==='volta')); renderResults(); drawMap(); }
-$('#showAllBtn').addEventListener('click', () => { focusVeh = null; renderResults(); drawMap(); });
+$('#showAllBtn').addEventListener('click', () => { focusKey = null; renderResults(); drawMap(); });
 
 function selectedTurnos(){
   const id = $('#rTurno').value;
   const ts = data.turno.slice().sort((a,b)=>(a.entrada||'').localeCompare(b.entrada||''));
   return id ? ts.filter(t => t.id === id) : ts;
 }
-const canDrive = f => f.cnh === 'pode' || f.cnh === 'fixo';
+const canDrive = f => f && (f.cnh === 'pode' || f.cnh === 'fixo');
+const planOf = turnoId => (data.plano||[]).find(p => p.id === turnoId);
+const funcById = id => data.func.find(f => f.id === id);
+const fmtDT = ms => ms ? new Intl.DateTimeFormat('pt-BR',{timeZone:TZ,day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}).format(new Date(ms)) : '';
+
 function renderPre(){
   const ts = selectedTurnos();
   const emps = data.func.filter(f => f.ativo !== false && ts.some(t => t.id === f.turnoId));
@@ -911,12 +968,12 @@ function renderPre(){
     <div class="stat"><b>${emps.filter(canDrive).length}</b><span>com CNH</span></div>
     <div class="stat"><b>${vehs.length}</b><span>carros${one?'':' (frota)'}</span></div>`;
   const w = [], c = cfg();
-  if (!c.tomtomKey) w.push('Configure a chave da TomTom em <b>Configurações</b>.');
   if (!c.geo) w.push('Localize o endereço da empresa em <b>Configurações</b>.');
   if (!data.turno.length) w.push('Cadastre os turnos na aba <b>Turnos</b>.');
   const noGeo = emps.filter(f => !f.geo);
   if (noGeo.length) w.push(`${noGeo.length} funcionário${noGeo.length>1?'s':''} sem localização ficará${noGeo.length>1?'ão':''} de fora. Use <b>Localizar endereços pendentes</b> na aba Funcionários.`);
   ts.forEach(t => {
+    if (planOf(t.id)) return;
     const es = data.func.filter(f => f.ativo!==false && f.turnoId===t.id && f.geo); if (!es.length) return;
     const cars = vehiclesFor(t.id).sort((a,b)=>b.capacidade-a.capacidade), cnh = es.filter(canDrive).length;
     const k = Math.min(cars.length, cnh), cap = cars.slice(0,k).reduce((a,v)=>a+(+v.capacidade||0),0);
@@ -924,13 +981,66 @@ function renderPre(){
     else if (cap < es.length) w.push(`${esc(t.nome)}: ${es.length} pessoas e só ${cap} lugares (${k} carro${k>1?'s':''}${cnh<cars.length?`, limitado por ${cnh} motorista${cnh>1?'s':''} com CNH`:''}). ${es.length-cap} ficarão sem rota.`);
   });
   $('#preWarn').innerHTML = w.length ? `<div class="notice">${w.join('<br>')}</div>` : '';
+  const saved = ts.filter(t => planOf(t.id)).length;
+  $('#runBtn').textContent = !ts.length ? 'Montar rotas' : saved === ts.length ? (one ? 'Recalcular todas as rotas do turno' : 'Recalcular todas as rotas') : saved ? 'Montar / recalcular rotas' : 'Montar rotas';
+  $('#runHint').textContent = saved ? 'As rotas salvas ficam fixas. Recalcular tudo substitui as rotas e os ajustes manuais do turno.' : '';
+}
+
+/* Linha da rota compactada (formato polyline do Google, precisão 5) */
+function encLine(pts){
+  let out = '', pl = 0, pn = 0;
+  const enc = v => { v = v < 0 ? ~(v << 1) : (v << 1); let s = ''; while (v >= 0x20){ s += String.fromCharCode((0x20 | (v & 0x1f)) + 63); v >>= 5; } return s + String.fromCharCode(v + 63); };
+  for (const [la, lo] of pts){ const a = Math.round(la*1e5), b = Math.round(lo*1e5); out += enc(a-pl) + enc(b-pn); pl = a; pn = b; }
+  return out;
+}
+function decLine(str){
+  const pts = []; let i = 0, la = 0, lo = 0;
+  const dec = () => { let r = 0, sh = 0, b; do { b = str.charCodeAt(i++) - 63; r |= (b & 0x1f) << sh; sh += 5; } while (b >= 0x20); return (r & 1) ? ~(r >> 1) : (r >> 1); };
+  while (i < str.length){ la += dec(); lo += dec(); pts.push([la/1e5, lo/1e5]); }
+  return pts;
+}
+
+/* Converte o plano salvo em objetos para a tela */
+function personIssue(f, t){
+  if (!f || f.missing) return 'Removido do cadastro';
+  if (f.ativo === false) return 'Inativo';
+  if (f.turnoId !== t.id) return 'Mudou de turno';
+  if (!f.geo) return 'Sem localização';
+  return '';
+}
+function hydrate(P){
+  const t = turnoById(P.turnoId); if (!t) return null;
+  const F = id => funcById(id) || {id, nome:'(removido do cadastro)', endereco:'', missing:true};
+  const used = new Set();
+  const routes = (P.rotas||[]).map((R, i) => {
+    used.add(R.motoristaId);
+    const mk = dir => {
+      const D = R[dir] || {}; (D.ids||[]).forEach(id => used.add(id));
+      return {dep:new Date(D.dep||0), arr:new Date(D.arr||0), meters:D.meters||0, travel:D.travel||0, delay:D.delay||0,
+        line: D.line ? decLine(D.line) : [],
+        stops: (D.ids||[]).map((id,k) => ({f:F(id), at:new Date((D.at||[])[k]||0), onboard:(D.onb||[])[k]||0}))};
+    };
+    const v = data.veic.find(x => x.id === R.veiculoId) || {id:R.veiculoId, nome:'(carro removido)', placa:'', capacidade:R.cap||0};
+    return {key:R.key, R, v, driver:F(R.motoristaId), color:R.cor || ROUTE_COLORS[i % ROUTE_COLORS.length],
+      manual:!!R.manual, motoristaManual:!!R.motoristaManual, ida:mk('ida'), volta:mk('volta')};
+  });
+  const emps = data.func.filter(f => f.ativo !== false && f.turnoId === t.id);
+  return {P, turno:t, routes, unassigned: emps.filter(f => f.geo && !used.has(f.id)), skipped: emps.filter(f => !f.geo && !used.has(f.id))};
+}
+function refreshPlan(){
+  const list = selectedTurnos().map(t => planOf(t.id)).filter(Boolean).map(hydrate).filter(Boolean);
+  plan = list.length ? list : null;
+  if (viewTurno >= (plan?.length || 0)) viewTurno = 0;
+  if (focusKey && !plan?.some(p => p.routes.some(r => r.key === focusKey))) focusKey = null;
+  renderPre(); renderResults();
+  if (currentTab === 'rotas') drawMap();
 }
 
 /* ---------------- Otimizador ----------------
    Cada rota = um carro + um motorista (funcionário com CNH) que mora na ponta da rota.
    Ida: casa do motorista → colegas → empresa. Volta: empresa → colegas → casa do motorista.
    Custo = 1,6 × km da rota + 0,6 × km que cada passageiro passa a bordo.
-   Distâncias estimadas (linha reta × 1,35); os horários finais vêm da TomTom com trânsito. */
+   Distâncias estimadas (linha reta × 1,35); os horários finais vêm do OSRM + estimativa de trânsito. */
 const W = 0.6;
 function routeCost(r){
   const n = r.stops.length;
@@ -1048,109 +1158,276 @@ function planShift(emps, vehs, company, fewer){
   return best;
 }
 
-async function buildTurno(t, dateStr, step){
+/* Cálculo de horários de uma rota salva (mantém a ordem definida) */
+async function timeR(R, t){
   const c = cfg(), dwell = (+c.dwell||0)*60, company = c.geo;
-  const emps = data.func.filter(f => f.ativo !== false && f.turnoId === t.id && f.geo);
-  const res = {turno:t, date:dateStr, routes:[], unassigned:[], reason:'', skipped: data.func.filter(f => f.ativo!==false && f.turnoId===t.id && !f.geo)};
-  if (!emps.length) return res;
-  const target = new Date(at(dateStr, t.entrada).getTime() - (+t.antecedencia||0)*60000);
-  const outDate = (t.saida <= t.entrada) ? addDays(dateStr, 1) : dateStr;
-  const leaveCo = new Date(at(outDate, t.saida).getTime() + (+c.after||0)*60000);
-  if (target.getTime() < Date.now() + 5*60000) throw new Error(`${t.nome}: a chegada de ${fmtDate(target)} às ${fmtTime(target)} já passou. Escolha uma data futura.`);
-  const pl = planShift(emps, vehiclesFor(t.id), company, $('#rFewer').checked);
-  res.unassigned = pl.unassigned; res.reason = pl.reason || '';
-  for (const [ri, r] of pl.routes.entries()){
-    const color = ROUTE_COLORS[ri % ROUTE_COLORS.length];
-    // IDA: casa do motorista → colegas → empresa, chegando no horário-alvo
-    const ptsIda = [r.start, ...r.stops.map(s=>s.geo), company];
-    let estKm = 0; for (let i = 0; i < ptsIda.length-1; i++) estKm += km(ptsIda[i], ptsIda[i+1]);
-    let dep = new Date(target.getTime() - (estKm/40*3600 + dwell*r.stops.length)*1000);
-    let rt = await routeTT(ptsIda, dep); step();
-    dep = new Date(target.getTime() - (rt.travel + dwell*r.stops.length)*1000);
-    rt = await routeTT(ptsIda, dep); step();
-    let tt = dep.getTime(); const ida = [];
-    rt.legs.forEach((l, i) => { tt += l.travelTimeInSeconds*1000; if (i < r.stops.length){ ida.push({f:r.stops[i], at:new Date(tt)}); tt += dwell*1000; } });
-    const arrCo = new Date(tt);
-    ida.forEach(s => { s.onboard = (arrCo - s.at)/1000; });
-    // VOLTA: empresa → colegas → casa do motorista (último do trajeto)
-    const vr = {start:company, end:r.start, stops:r.stops.slice().reverse(), dir:'volta'}; twoOpt(vr);
-    const rv = await routeTT([company, ...vr.stops.map(s=>s.geo), r.start], leaveCo); step();
-    tt = leaveCo.getTime(); const volta = [];
-    rv.legs.forEach((l, i) => { tt += l.travelTimeInSeconds*1000; if (i < vr.stops.length){ volta.push({f:vr.stops[i], at:new Date(tt), onboard:(tt-leaveCo.getTime())/1000}); tt += dwell*1000; } });
-    res.routes.push({v:r.car, driver:r.driver, color,
-      ida:{dep, arr:arrCo, stops:ida, line:rt.line, meters:rt.meters, travel:rt.travel, delay:Math.max(0, rt.travel-rt.free)},
-      volta:{dep:leaveCo, arr:new Date(tt), stops:volta, line:rv.line, meters:rv.meters, travel:rv.travel, delay:Math.max(0, rv.travel-rv.free)}});
-  }
-  return res;
+  const drv = funcById(R.motoristaId);
+  if (!drv?.geo) throw new Error('O motorista desta rota não tem endereço localizado.');
+  const keep = id => { const f = funcById(id); return f && f.geo; };
+  R.ida.ids = (R.ida.ids||[]).filter(keep); R.volta.ids = (R.volta.ids||[]).filter(keep);
+  const dRef = ymd(new Date());
+  const target = at(dRef, t.entrada).getTime() - (+t.antecedencia||0)*60000;
+  const outDate = (t.saida <= t.entrada) ? addDays(dRef, 1) : dRef;
+  const leaveCo = at(outDate, t.saida).getTime() + (+c.after||0)*60000;
+  const idaF = R.ida.ids.map(funcById), voltaF = R.volta.ids.map(funcById);
+  const rt = await routeOSRM([drv.geo, ...idaF.map(f=>f.geo), company]);
+  let dep = target - (rt.legs.reduce((a,l)=>a+l.duration,0)*1.2 + dwell*idaF.length)*1000, si;
+  for (let k = 0; k < 5; k++){ si = schedule(rt.legs, dep, dwell, idaF.length); dep -= (si.end - target); }
+  si = schedule(rt.legs, dep, dwell, idaF.length);
+  R.ida = {ids:R.ida.ids, dep, arr:si.end, at:si.arrivals.slice(0, idaF.length).map(d=>d.getTime()),
+    onb:si.arrivals.slice(0, idaF.length).map(d => (si.end - d.getTime())/1000),
+    meters:rt.meters, travel:si.travel, delay:Math.max(0, si.travel - si.free), line:encLine(rt.line)};
+  const rv = await routeOSRM([company, ...voltaF.map(f=>f.geo), drv.geo]);
+  const sv = schedule(rv.legs, leaveCo, dwell, voltaF.length);
+  R.volta = {ids:R.volta.ids, dep:leaveCo, arr:sv.end, at:sv.arrivals.slice(0, voltaF.length).map(d=>d.getTime()),
+    onb:sv.arrivals.slice(0, voltaF.length).map(d => (d.getTime() - leaveCo)/1000),
+    meters:rv.meters, travel:sv.travel, delay:Math.max(0, sv.travel - sv.free), line:encLine(rv.line)};
 }
+function bestOrder(startGeo, endGeo, people, dir){
+  const r = {start:startGeo, end:endGeo, stops:people.filter(f => f && f.geo), dir}; twoOpt(r); return r.stops;
+}
+function insertAt(ids, f, startGeo, endGeo, dir){
+  const stops = ids.map(funcById).filter(x => x && x.geo);
+  const r = {start:startGeo, end:endGeo, stops, dir}; r.cost = routeCost(r);
+  let best = null;
+  for (let p = 0; p <= stops.length; p++){ stops.splice(p, 0, f); const c = routeCost(r); stops.splice(p, 1); if (!best || c < best.c) best = {c, p}; }
+  stops.splice(best.p, 0, f);
+  return stops.map(x => x.id);
+}
+function occupants(R){ return 1 + (R.ida.ids||[]).length; }
+function capOf(R){ const v = data.veic.find(x => x.id === R.veiculoId); return +v?.capacidade || +R.cap || 0; }
 
+/* Montagem completa de um turno */
+async function buildPlan(t, step){
+  const c = cfg(), company = c.geo;
+  const emps = data.func.filter(f => f.ativo !== false && f.turnoId === t.id && f.geo);
+  const pl = emps.length ? planShift(emps, vehiclesFor(t.id), company, $('#rFewer').checked) : {routes:[], unassigned:[], reason:'Nenhum funcionário localizado neste turno.'};
+  const rotas = pl.routes.map((r, i) => ({key:uid(), veiculoId:r.car.id, cap:+r.car.capacidade, motoristaId:r.driver.id, motoristaManual:false, manual:false,
+    cor:ROUTE_COLORS[i % ROUTE_COLORS.length], ida:{ids:r.stops.map(f=>f.id)}, volta:{ids:bestOrder(company, r.driver.geo, r.stops.slice().reverse(), 'volta').map(f=>f.id)}}));
+  for (const R of rotas){ await timeR(R, t); step(); }
+  const P = {id:t.id, turnoId:t.id, geradoEm:Date.now(), geradoPor:user?.email || '', editadoEm:null, editadoPor:'', reason:pl.reason || '', rotas};
+  await Store.put('plano', P);
+}
 $('#runBtn').addEventListener('click', async () => {
-  const c = cfg(), ts = selectedTurnos(), dateStr = $('#rDate').value;
-  if (!c.tomtomKey){ toast('Configure a chave da TomTom em Configurações.'); showTab('config'); return; }
+  if (busy) return;
+  const c = cfg(), ts = selectedTurnos();
   if (!c.geo){ toast('Localize o endereço da empresa em Configurações.'); showTab('config'); return; }
   if (!ts.length){ toast('Cadastre pelo menos um turno.'); return; }
-  if (!dateStr){ toast('Escolha a data.'); return; }
-  const btn = $('#runBtn'); btn.disabled = true; plan = null; focusVeh = null; viewTurno = 0;
-  let total = 0; ts.forEach(t => { const es = data.func.filter(f=>f.ativo!==false&&f.turnoId===t.id&&f.geo); total += 3*Math.max(1, Math.min(vehiclesFor(t.id).length, es.filter(canDrive).length)); });
-  let done = 0; const step = () => { done++; $('#bar').style.width = Math.min(100, done/total*100) + '%'; };
-  const out = [];
-  try{
-    for (const t of ts){ setStatus(`Montando ${t.nome}…`); await sleep(20); out.push(await buildTurno(t, dateStr, step)); }
-    plan = out; setStatus(`Rotas prontas · ${done} consultas de rota com trânsito.`);
-  }catch(e){ console.error(e); setStatus(e.message || String(e), true); if (out.length) plan = out; }
-  btn.disabled = false; setTimeout(()=>{ $('#bar').style.width = '0'; }, 800);
-  renderResults(); drawMap();
+  const saved = ts.filter(t => planOf(t.id));
+  if (saved.length && !confirm(`Recalcular substitui as rotas salvas, inclusive os ajustes manuais, de: ${saved.map(t=>t.nome).join(', ')}.\n\nContinuar?`)) return;
+  await runBuild(ts);
 });
+async function runBuild(ts){
+  busy = true; $('#runBtn').disabled = true; focusKey = null; viewTurno = 0;
+  let total = 0; ts.forEach(t => { const es = data.func.filter(f=>f.ativo!==false&&f.turnoId===t.id&&f.geo); total += Math.max(1, Math.min(vehiclesFor(t.id).length, es.filter(canDrive).length)); });
+  let done = 0; const step = () => { done++; $('#bar').style.width = Math.min(100, done/total*100) + '%'; };
+  try{
+    for (const t of ts){ setStatus(`Montando ${t.nome}…`); await sleep(20); await buildPlan(t, step); }
+    setStatus('Rotas salvas. Elas ficam fixas até alguém recalcular ou ajustar.');
+  }catch(e){ console.error(e); setStatus(e.message || String(e), true); }
+  busy = false; $('#runBtn').disabled = false; setTimeout(()=>{ $('#bar').style.width = '0'; }, 800);
+  lastFit = ''; refreshPlan();
+}
 function setStatus(msg, err){ const s = $('#status'); s.textContent = msg; s.classList.toggle('err', !!err); }
 
+/* Edição de um plano salvo: aplica a mudança, recalcula os horários das rotas afetadas e salva */
+async function editPlan(turnoId, label, mutate){
+  if (busy) return;
+  const P0 = planOf(turnoId), t = turnoById(turnoId); if (!P0 || !t) return;
+  const P = JSON.parse(JSON.stringify(P0));
+  let touched;
+  try{ touched = mutate(P); }catch(e){ toast(e.message, 5000); return; }
+  if (touched === false) return;
+  busy = true; setStatus(label + '…');
+  try{
+    for (const key of new Set(touched || [])){ const R = P.rotas.find(r => r.key === key); if (R) await timeR(R, t); }
+    P.editadoEm = Date.now(); P.editadoPor = user?.email || '';
+    await Store.put('plano', P);
+    setStatus(label + ' — salvo.');
+  }catch(e){ console.error(e); setStatus(e.message || String(e), true); }
+  busy = false; refreshPlan();
+}
+const findR = (P, key) => { const R = P.rotas.find(r => r.key === key); if (!R) throw new Error('Rota não encontrada.'); return R; };
+function removeFrom(R, fid){ R.ida.ids = R.ida.ids.filter(x => x !== fid); R.volta.ids = R.volta.ids.filter(x => x !== fid); }
+function addTo(R, f){
+  if (occupants(R) >= capOf(R)) throw new Error('Este carro já está lotado. Troque o carro ou tire alguém antes.');
+  if (!f.geo) throw new Error(`${f.nome} não tem endereço localizado.`);
+  const drv = funcById(R.motoristaId), co = cfg().geo;
+  R.ida.ids = insertAt(R.ida.ids, f, drv.geo, co, 'ida');
+  R.volta.ids = insertAt(R.volta.ids, f, co, drv.geo, 'volta');
+}
+const Edit = {
+  move(turnoId, fromKey, fid, toKey){
+    const f = funcById(fid);
+    editPlan(turnoId, toKey === 'none' ? `Retirando ${f?.nome||''} da rota` : `Movendo ${f?.nome||''}`, P => {
+      const touched = [];
+      if (fromKey){ const A = findR(P, fromKey); removeFrom(A, fid); A.manual = true; touched.push(A.key); }
+      if (toKey && toKey !== 'none'){ const B = findR(P, toKey); addTo(B, f); B.manual = true; touched.push(B.key); }
+      return touched;
+    });
+  },
+  reorder(turnoId, key, dir, idx, delta){
+    editPlan(turnoId, 'Alterando a ordem', P => {
+      const R = findR(P, key), ids = R[dir].ids, j = idx + delta;
+      if (j < 0 || j >= ids.length) return false;
+      [ids[idx], ids[j]] = [ids[j], ids[idx]]; R.manual = true; return [key];
+    });
+  },
+  setDriver(turnoId, key, fid){
+    const f = funcById(fid);
+    editPlan(turnoId, `${f?.nome||''} passa a ser o motorista`, P => {
+      const R = findR(P, key), old = funcById(R.motoristaId);
+      removeFrom(R, fid); R.motoristaId = fid; R.motoristaManual = true; R.manual = true;
+      if (old && old.geo && !old.missing){ const co = cfg().geo; R.ida.ids = insertAt(R.ida.ids, old, f.geo, co, 'ida'); R.volta.ids = insertAt(R.volta.ids, old, co, f.geo, 'volta'); }
+      return [key];
+    });
+  },
+  setCar(turnoId, key, vid){
+    editPlan(turnoId, 'Trocando o carro', P => {
+      const R = findR(P, key), v = data.veic.find(x => x.id === vid);
+      if (!v) return false;
+      if (occupants(R) > +v.capacidade) throw new Error(`${v.nome} tem ${v.capacidade} lugares e a rota tem ${occupants(R)} pessoas.`);
+      R.veiculoId = vid; R.cap = +v.capacidade; R.manual = true; return [];
+    });
+  },
+  newRoute(turnoId, fid){
+    const f = funcById(fid);
+    editPlan(turnoId, `Criando rota com ${f?.nome||''} dirigindo`, P => {
+      const usedCars = new Set(P.rotas.map(r => r.veiculoId));
+      const car = vehiclesFor(turnoId).filter(v => !usedCars.has(v.id)).sort((a,b)=>b.capacidade-a.capacidade)[0];
+      if (!car) throw new Error('Não há carro livre neste turno. Cadastre ou libere um veículo.');
+      P.rotas.forEach(r => removeFrom(r, fid));
+      const usedColors = new Set(P.rotas.map(r => r.cor));
+      const R = {key:uid(), veiculoId:car.id, cap:+car.capacidade, motoristaId:fid, motoristaManual:true, manual:true,
+        cor: ROUTE_COLORS.find(c => !usedColors.has(c)) || ROUTE_COLORS[P.rotas.length % ROUTE_COLORS.length], ida:{ids:[]}, volta:{ids:[]}};
+      P.rotas.push(R); return [R.key];
+    });
+  },
+  deleteRoute(turnoId, key){
+    const P = planOf(turnoId), R = P?.rotas.find(r => r.key === key); if (!R) return;
+    if (!confirm(`Excluir esta rota? O motorista e os ${R.ida.ids.length} passageiros ficam na lista "Sem rota".`)) return;
+    editPlan(turnoId, 'Excluindo rota', P => { P.rotas = P.rotas.filter(r => r.key !== key); return []; });
+  },
+  recalcRoute(turnoId, key){
+    editPlan(turnoId, 'Recalculando a rota', P => {
+      const R = findR(P, key), co = cfg().geo;
+      const drv = funcById(R.motoristaId);
+      const people = R.ida.ids.map(funcById).filter(f => f && f.geo && f.ativo !== false && f.turnoId === turnoId);
+      let driver = drv, stops;
+      const cands = (R.motoristaManual || drv?.cnh === 'fixo') ? [drv] : [drv, ...people.filter(canDrive)];
+      let best = null;
+      cands.filter(d => d && d.geo).forEach(d => {
+        const others = [drv, ...people].filter(x => x && x.geo && x !== d && !(x === drv && (drv.ativo === false || drv.turnoId !== turnoId)));
+        const r = {start:d.geo, end:co, stops:others, dir:'ida'}; twoOpt(r); const c = routeCost(r);
+        if (!best || c < best.c) best = {c, d, stops:r.stops.slice()};
+      });
+      if (!best) throw new Error('A rota não tem motorista com endereço localizado.');
+      driver = best.d; stops = best.stops;
+      R.motoristaId = driver.id; R.ida.ids = stops.map(f => f.id);
+      R.volta.ids = bestOrder(co, driver.geo, stops.slice().reverse(), 'volta').map(f => f.id);
+      R.manual = false; return [key];
+    });
+  }
+};
+
+/* ---------------- Resultado ---------------- */
 function onboardCls(sec){ return sec > 90*60 ? 'vlong' : sec > 60*60 ? 'long' : ''; }
 function renderResults(){
   const el = $('#results');
   $('#resActions').hidden = !plan;
-  $('#showAllBtn').hidden = focusVeh == null;
-  if (!plan){ el.innerHTML = '<div class="empty">Escolha o turno e a data e clique em <b>Montar rotas</b>. O sistema escolhe os motoristas entre quem tem CNH, morando na ponta de cada rota, e divide os colegas entre os carros.</div>'; return; }
+  $('#showAllBtn').hidden = !focusKey;
+  if (!plan){ el.innerHTML = '<div class="empty">Nenhuma rota salva para este turno. Clique em <b>Montar rotas</b>: o sistema escolhe os motoristas entre quem tem CNH, morando na ponta de cada rota, divide os colegas entre os carros e salva o resultado.</div>'; return; }
   el.innerHTML = plan.map((p, pi) => {
+    const t = p.turno;
     const pax = p.routes.reduce((a,r)=>a+r.ida.stops.length+1,0);
     const kmTot = p.routes.reduce((a,r)=>a+r[viewDir].meters,0);
-    const warn = [];
-    if (p.reason) warn.push(`<b>${esc(p.reason)}</b>`);
-    if (p.unassigned.length) warn.push(`<b>${p.unassigned.length} sem rota</b> (faltam lugares ou motoristas): ${p.unassigned.map(f=>esc(f.nome)).join(', ')}`);
-    if (p.skipped.length) warn.push(`<b>${p.skipped.length} sem localização</b>: ${p.skipped.map(f=>esc(f.nome)).join(', ')}`);
+    const routeOpts = (exceptKey) => p.routes.filter(r => r.key !== exceptKey).map(r => `<option value="${r.key}">${esc(r.v.nome)} · ${esc(r.driver.nome)} (${r.ida.stops.length+1}/${r.v.capacidade})</option>`).join('');
+    const usedCars = new Set(p.routes.map(r => r.v.id));
+    const freeCars = vehiclesFor(t.id).filter(v => !usedCars.has(v.id));
     const cards = p.routes.map(r => {
-      const d = r[viewDir], key = r.driver.id;
-      const dim = focusVeh != null && !(focusVeh.p===pi && focusVeh.id===key);
-      const open = focusVeh && focusVeh.p===pi && focusVeh.id===key;
+      const d = r[viewDir], key = r.key, open = focusKey === key, dim = focusKey && !open;
+      const drvIssue = personIssue(r.driver, t);
       const drv = `<span class="n" style="background:${r.color}">M</span>`;
+      const total = (d.arr - d.dep)/1000;
       const first = viewDir==='ida'
-        ? `<li>${drv}<div class="who2"><b>${esc(r.driver.nome)} sai de casa dirigindo</b><span>${esc(r.driver.endereco)}</span></div><div class="t">${fmtTime(d.dep)}<small class="${onboardCls(d.arr-d.dep>0?(d.arr-d.dep)/1000:0)}">${fmtDur((d.arr-d.dep)/1000)} ao volante</small></div></li>`
-        : `<li><span class="n sq">CD</span><div class="who2"><b>Sai da empresa</b></div><div class="t">${fmtTime(d.dep)}</div></li>`;
+        ? `<li>${drv}<div class="who2"><b>${esc(r.driver.nome)} sai de casa dirigindo</b><span>${esc(r.driver.endereco||'')}</span>${drvIssue?`<span class="chip err">${drvIssue}</span>`:''}</div><div class="t">${fmtTime(d.dep)}<small class="${onboardCls(total)}">${fmtDur(total)} ao volante</small></div><div></div></li>`
+        : `<li><span class="n sq">CD</span><div class="who2"><b>Sai da empresa</b></div><div class="t">${fmtTime(d.dep)}</div><div></div></li>`;
       const last = viewDir==='ida'
-        ? `<li><span class="n sq">CD</span><div class="who2"><b>Chega à empresa</b><span>${esc(p.turno.nome)} entra ${p.turno.entrada}</span></div><div class="t">${fmtTime(d.arr)}</div></li>`
-        : `<li>${drv}<div class="who2"><b>${esc(r.driver.nome)} chega em casa</b><span>${esc(r.driver.endereco)}</span></div><div class="t">${fmtTime(d.arr)}<small class="${onboardCls((d.arr-d.dep)/1000)}">${fmtDur((d.arr-d.dep)/1000)} ao volante</small></div></li>`;
+        ? `<li><span class="n sq">CD</span><div class="who2"><b>Chega à empresa</b><span>${esc(t.nome)} entra ${t.entrada}</span></div><div class="t">${fmtTime(d.arr)}</div><div></div></li>`
+        : `<li>${drv}<div class="who2"><b>${esc(r.driver.nome)} chega em casa</b><span>${esc(r.driver.endereco||'')}</span></div><div class="t">${fmtTime(d.arr)}<small class="${onboardCls(total)}">${fmtDur(total)} ao volante</small></div><div></div></li>`;
+      const rows = d.stops.map((s,i) => {
+        const iss = personIssue(s.f, t);
+        return `<li><span class="n" style="background:${r.color}">${i+1}</span>
+          <div class="who2"><b>${esc(s.f.nome)}</b><span>${esc(s.f.endereco||'')}</span>${iss?`<span class="chip err">${iss}</span>`:''}</div>
+          <div class="t">${fmtTime(s.at)}<small class="${onboardCls(s.onboard)}">${fmtDur(s.onboard)} a bordo</small></div>
+          <div class="row-act">
+            <button class="icon-btn" data-act="up" data-k="${key}" data-i="${i}" ${i===0?'disabled':''} aria-label="Subir ${esc(s.f.nome)}" title="Subir na ordem">↑</button>
+            <button class="icon-btn" data-act="down" data-k="${key}" data-i="${i}" ${i===d.stops.length-1?'disabled':''} aria-label="Descer ${esc(s.f.nome)}" title="Descer na ordem">↓</button>
+            ${canDrive(s.f) && !iss ? `<button class="icon-btn" data-act="driver" data-k="${key}" data-f="${s.f.id}" title="Tornar motorista" aria-label="Tornar ${esc(s.f.nome)} motorista">M</button>` : ''}
+            <select class="mini" data-act="move" data-k="${key}" data-f="${s.f.id}" aria-label="Mover ${esc(s.f.nome)}"><option value="">Mover…</option>${routeOpts(key)}<option value="none">Tirar da rota</option></select>
+          </div></li>`;
+      }).join('');
+      const addOpts = p.unassigned.map(f => `<option value="${f.id}">${esc(f.nome)}</option>`).join('');
       return `<div class="vcard ${dim?'dim':''}">
-        <div class="vhead" data-p="${pi}" data-v="${key}" tabindex="0" role="button" aria-expanded="${!!open}">
+        <div class="vhead" data-p="${pi}" data-v="${key}" tabindex="0" role="button" aria-expanded="${open}">
           <span class="sw" style="background:${r.color}"></span>
-          <div><b>${esc(r.v.nome)}</b> <span class="meta">${esc(r.v.placa||'')}</span>
-            <div class="meta">Motorista: <b style="font-weight:600;color:var(--fg)">${esc(r.driver.nome)}</b>${r.driver.cnh==='fixo'?' (fixo)':''}</div>
-            <div class="meta">${d.stops.length+1}/${r.v.capacidade} lugares · ${fmtKm(d.meters)} · ${fmtDur(d.travel)}${d.delay>=120?` · <span class="long">+${fmtDur(d.delay)} trânsito</span>`:''}</div></div>
+          <div><b>${esc(r.v.nome)}</b> <span class="meta">${esc(r.v.placa||'')}</span>${r.manual?' <span class="chip warn">Ajustada</span>':''}
+            <div class="meta">Motorista: <b style="font-weight:600;color:var(--fg)">${esc(r.driver.nome)}</b>${r.driver.cnh==='fixo'?' (fixo)':r.motoristaManual?' (escolhido)':''}</div>
+            <div class="meta">${d.stops.length+1}/${r.v.capacidade} lugares · ${fmtKm(d.meters)} · ${fmtDur(d.travel)}${d.delay>=120?` · <span class="long">+${fmtDur(d.delay)} trânsito est.</span>`:''}</div></div>
           <div class="times">${fmtTime(d.dep)} → ${fmtTime(d.arr)}<small>${viewDir==='ida'?'casa → empresa':'empresa → casa'}</small></div>
         </div>
-        ${open ? `<div class="vbody"><ol class="itin">${first}${d.stops.map((s,i)=>`<li><span class="n" style="background:${r.color}">${i+1}</span><div class="who2"><b>${esc(s.f.nome)}</b><span>${esc(s.f.endereco)}</span></div><div class="t">${fmtTime(s.at)}<small class="${onboardCls(s.onboard)}">${fmtDur(s.onboard)} a bordo</small></div></li>`).join('')}${last}</ol>
-          <div class="btn-row"><button class="btn small" data-copy="${pi}|${key}" type="button">Copiar rota para o motorista</button></div></div>` : ''}
+        ${open ? `<div class="vbody"><ol class="itin">${first}${rows}${last}</ol>
+          <div class="edit-row">
+            ${addOpts ? `<select class="mini" data-act="add" data-k="${key}" aria-label="Adicionar pessoa"><option value="">+ Adicionar pessoa…</option>${addOpts}</select>` : ''}
+            ${freeCars.length ? `<select class="mini" data-act="car" data-k="${key}" aria-label="Trocar carro"><option value="">Trocar carro…</option>${freeCars.map(v=>`<option value="${v.id}">${esc(v.nome)} (${v.capacidade} lugares)</option>`).join('')}</select>` : ''}
+          </div>
+          <div class="btn-row">
+            <button class="btn small" data-act="recalc" data-k="${key}" type="button">Recalcular esta rota</button>
+            <button class="btn small" data-act="copy" data-k="${key}" type="button">Copiar para o motorista</button>
+            <button class="btn small danger" data-act="del" data-k="${key}" type="button">Excluir rota</button>
+          </div>
+          <p class="hint">Ajustes manuais mantêm a ordem que você definir e só recalculam os horários. "Recalcular esta rota" refaz a melhor ordem${r.motoristaManual||r.driver.cnh==='fixo'?'':' e o melhor motorista'} com as mesmas pessoas.</p></div>` : ''}
       </div>`;
     }).join('');
-    return `<div class="turno-res">
-      <div class="turno-head ${pi===viewTurno?'sel':''}" data-t="${pi}"><h4>${esc(p.turno.nome)} · ${fmtDate(at(p.date,'12:00'))}</h4><span class="hint">${p.routes.length} carro${p.routes.length!==1?'s':''} · ${pax} pessoas · ${fmtKm(kmTot)}</span></div>
-      ${warn.length ? `<div class="notice err">${warn.join('<br>')}</div>` : ''}
-      ${cards || '<div class="empty">Nenhuma rota neste turno.</div>'}
+    const pool = p.unassigned.length ? `<div class="pool"><b>Sem rota (${p.unassigned.length})</b>
+      <ul>${p.unassigned.map(f => `<li><span>${esc(f.nome)}${canDrive(f)?' <span class="chip neutral">CNH</span>':''}<span class="sub">${esc(f.endereco||'')}</span></span>
+        <span class="row-act">${p.routes.length?`<select class="mini" data-act="place" data-f="${f.id}" aria-label="Colocar ${esc(f.nome)} em uma rota"><option value="">Colocar em…</option>${routeOpts(null)}</select>`:''}
+        ${canDrive(f)?`<button class="btn small" data-act="newroute" data-f="${f.id}" type="button">Nova rota dirigindo</button>`:''}</span></li>`).join('')}</ul></div>` : '';
+    const skipped = p.skipped.length ? `<div class="notice err"><b>${p.skipped.length} sem localização</b>: ${p.skipped.map(f=>esc(f.nome)).join(', ')}</div>` : '';
+    const reason = (!p.routes.length && p.P.reason) ? `<div class="notice err"><b>${esc(p.P.reason)}</b></div>` : '';
+    const meta = `Gerado em ${fmtDT(p.P.geradoEm)}${p.P.geradoPor?' por '+esc(p.P.geradoPor.split('@')[0]):''}${p.P.editadoEm?` · ajustado em ${fmtDT(p.P.editadoEm)}${p.P.editadoPor?' por '+esc(p.P.editadoPor.split('@')[0]):''}`:''}`;
+    return `<div class="turno-res" data-turno="${t.id}">
+      <div class="turno-head ${pi===viewTurno?'sel':''}" data-t="${pi}"><h4>${esc(t.nome)} <span class="hint">${t.entrada}–${t.saida}</span></h4><span class="hint">${p.routes.length} carro${p.routes.length!==1?'s':''} · ${pax} pessoas · ${fmtKm(kmTot)}</span></div>
+      <p class="hint">${meta}</p>
+      ${reason}${pool}${skipped}
+      ${cards}
     </div>`;
   }).join('');
-  el.querySelectorAll('.turno-head').forEach(h => h.addEventListener('click', () => { viewTurno = +h.dataset.t; focusVeh = null; renderResults(); drawMap(); }));
+  el.querySelectorAll('.turno-head').forEach(h => h.addEventListener('click', () => { viewTurno = +h.dataset.t; focusKey = null; renderResults(); drawMap(); }));
   el.querySelectorAll('.vhead').forEach(h => {
-    const go = () => { const p = +h.dataset.p, id = h.dataset.v; viewTurno = p; focusVeh = (focusVeh && focusVeh.p===p && focusVeh.id===id) ? null : {p, id}; renderResults(); drawMap(); };
+    const go = () => { viewTurno = +h.dataset.p; focusKey = focusKey === h.dataset.v ? null : h.dataset.v; renderResults(); drawMap(); };
     h.addEventListener('click', go); h.addEventListener('keydown', e => { if (e.key==='Enter'||e.key===' '){ e.preventDefault(); go(); } });
   });
-  el.querySelectorAll('[data-copy]').forEach(b => b.addEventListener('click', () => { const [p, id] = b.dataset.copy.split('|'); copyRoute(plan[+p], plan[+p].routes.find(r=>r.driver.id===id)); }));
+  const tid = node => node.closest('.turno-res').dataset.turno;
+  el.querySelectorAll('[data-act]').forEach(n => {
+    const a = n.dataset.act, k = n.dataset.k, fid = n.dataset.f;
+    if (n.tagName === 'SELECT') n.addEventListener('change', () => {
+      const v = n.value; if (!v) return; const T = tid(n);
+      if (a === 'move') Edit.move(T, k, fid, v);
+      else if (a === 'add') Edit.move(T, null, v, k);
+      else if (a === 'place') Edit.move(T, null, fid, v);
+      else if (a === 'car') Edit.setCar(T, k, v);
+    });
+    else n.addEventListener('click', e => {
+      e.stopPropagation(); const T = tid(n);
+      if (a === 'up' || a === 'down') Edit.reorder(T, k, viewDir, +n.dataset.i, a === 'up' ? -1 : 1);
+      else if (a === 'driver') Edit.setDriver(T, k, fid);
+      else if (a === 'recalc') Edit.recalcRoute(T, k);
+      else if (a === 'del') Edit.deleteRoute(T, k);
+      else if (a === 'newroute') Edit.newRoute(T, fid);
+      else if (a === 'copy'){ const p = plan.find(x => x.turno.id === T); copyRoute(p, p.routes.find(r => r.key === k)); }
+    });
+  });
 }
 
 function drawMap(){
@@ -1168,30 +1445,36 @@ function drawMap(){
     });
   } else {
     p.routes.forEach(r => {
-      const focused = !focusVeh || focusVeh.id === r.driver.id, d = r[viewDir];
-      if (focused){
-        L.polyline(d.line, {color:'#ffffff', weight:7, opacity:.85}).addTo(layer);
-        L.polyline(d.line, {color:r.color, weight:4, opacity:.95}).bindTooltip(`${r.v.nome} · ${r.driver.nome}`).addTo(layer);
-        d.line.forEach((pt,i) => { if (i % 20 === 0) bounds.push(pt); });
-      } else L.polyline(d.line, {color:r.color, weight:2, opacity:.25}).addTo(layer);
+      const focused = !focusKey || focusKey === r.key, d = r[viewDir];
+      if (d.line.length){
+        if (focused){
+          L.polyline(d.line, {color:'#ffffff', weight:7, opacity:.85}).addTo(layer);
+          L.polyline(d.line, {color:r.color, weight:4, opacity:.95}).bindTooltip(`${r.v.nome} · ${r.driver.nome}`).addTo(layer);
+          d.line.forEach((pt,i) => { if (i % 10 === 0) bounds.push(pt); });
+        } else L.polyline(d.line, {color:r.color, weight:2, opacity:.25}).addTo(layer);
+      }
       const g = r.driver.geo;
-      L.marker([g.lat,g.lon], {icon:L.divIcon({className:'', html:`<div class="mk home" style="background:${r.color}">M</div>`, iconSize:[28,24], iconAnchor:[14,12]}), opacity: focused?1:.4, zIndexOffset:800})
-        .bindPopup(`<b>${esc(r.driver.nome)}</b> · motorista<br>${esc(r.v.nome)}<br>${viewDir==='ida'?'Sai de casa '+fmtTime(d.dep):'Chega em casa '+fmtTime(d.arr)}`).addTo(layer);
-      bounds.push([g.lat,g.lon]);
+      if (g){
+        L.marker([g.lat,g.lon], {icon:L.divIcon({className:'', html:`<div class="mk home" style="background:${r.color}">M</div>`, iconSize:[28,24], iconAnchor:[14,12]}), opacity: focused?1:.4, zIndexOffset:800})
+          .bindPopup(`<b>${esc(r.driver.nome)}</b> · motorista<br>${esc(r.v.nome)}<br>${viewDir==='ida'?'Sai de casa '+fmtTime(d.dep):'Chega em casa '+fmtTime(d.arr)}`).addTo(layer);
+        bounds.push([g.lat,g.lon]);
+      }
       if (focused) d.stops.forEach((s,i) => {
+        if (!s.f.geo) return;
         L.marker([s.f.geo.lat,s.f.geo.lon], {icon:L.divIcon({className:'', html:`<div class="mk" style="background:${r.color}">${i+1}</div>`, iconSize:[24,24], iconAnchor:[12,12]})})
           .bindPopup(`<b>${i+1}. ${esc(s.f.nome)}</b><br>${esc(s.f.endereco)}<br>${viewDir==='ida'?'Embarque':'Desembarque'} ${fmtTime(s.at)} · ${fmtDur(s.onboard)} a bordo<br><i>${esc(r.v.nome)} · ${esc(r.driver.nome)}</i>`).addTo(layer);
         bounds.push([s.f.geo.lat,s.f.geo.lon]);
       });
     });
-    p.unassigned.forEach(f => L.marker([f.geo.lat,f.geo.lon], {icon:L.divIcon({className:'', html:'<div class="mk" style="background:#c0392b">!</div>', iconSize:[24,24], iconAnchor:[12,12]})}).bindPopup(`<b>${esc(f.nome)}</b><br>Sem rota (faltam lugares ou motoristas)`).addTo(layer));
+    p.unassigned.forEach(f => L.marker([f.geo.lat,f.geo.lon], {icon:L.divIcon({className:'', html:'<div class="mk" style="background:#c0392b">!</div>', iconSize:[24,24], iconAnchor:[12,12]})}).bindPopup(`<b>${esc(f.nome)}</b><br>Sem rota`).addTo(layer));
   }
-  if (bounds.length > 1) map.fitBounds(bounds, {padding:[40,40], maxZoom:14});
+  const fitKey = `${$('#rTurno').value}|${viewTurno}|${focusKey}|${viewDir}|${p ? p.P.geradoEm : 'pre'}|${bounds.length > 1}`;
+  if (bounds.length > 1 && fitKey !== lastFit){ map.fitBounds(bounds, {padding:[40,40], maxZoom:14}); lastFit = fitKey; }
 }
 
 /* ---------------- Exportar e copiar ---------------- */
 function copyRoute(p, r){
-  const L1 = [`*${r.v.nome}${r.v.placa?' ('+r.v.placa+')':''} · ${p.turno.nome} · ${fmtDate(at(p.date,'12:00'))}*`, `Motorista: ${r.driver.nome}`, '',
+  const L1 = [`*${r.v.nome}${r.v.placa?' ('+r.v.placa+')':''} · ${p.turno.nome}*`, `Motorista: ${r.driver.nome}`, '',
     `*IDA* – sair de casa às ${fmtTime(r.ida.dep)}`];
   r.ida.stops.forEach((s,i) => L1.push(`${i+1}. ${fmtTime(s.at)} – ${s.f.nome} – ${s.f.endereco}`));
   L1.push(`Chegada na empresa: ${fmtTime(r.ida.arr)}`, '', `*VOLTA* – sair da empresa às ${fmtTime(r.volta.dep)}`);
@@ -1206,25 +1489,25 @@ function copyRoute(p, r){
 }
 $('#exportPlan').addEventListener('click', () => {
   if (!plan) return;
-  const resumo = [['Turno','Data','Veículo','Placa','Motorista','Telefone motorista','Ocupantes','Lugares','Ida: sai de casa','Ida: chega empresa','Ida km','Volta: sai empresa','Volta: chega em casa','Volta km']];
+  const resumo = [['Turno','Veículo','Placa','Motorista','Telefone motorista','Ocupantes','Lugares','Ida: sai de casa','Ida: chega empresa','Ida km','Volta: sai empresa','Volta: chega em casa','Volta km','Ajustada manualmente']];
   const ida = [['Turno','Veículo','Motorista','Ordem','Funcionário','Endereço','Telefone','Embarque','Tempo a bordo (min)']];
   const volta = [['Turno','Veículo','Motorista','Ordem','Funcionário','Endereço','Telefone','Desembarque','Tempo a bordo (min)']];
   const sem = [['Turno','Funcionário','Endereço','Motivo']];
   plan.forEach(p => {
     p.routes.forEach(r => {
-      resumo.push([p.turno.nome, p.date, r.v.nome, r.v.placa||'', r.driver.nome, r.driver.telefone||'', r.ida.stops.length+1, +r.v.capacidade, fmtTime(r.ida.dep), fmtTime(r.ida.arr), +(r.ida.meters/1000).toFixed(1), fmtTime(r.volta.dep), fmtTime(r.volta.arr), +(r.volta.meters/1000).toFixed(1)]);
-      ida.push([p.turno.nome, r.v.nome, r.driver.nome, 'Motorista', r.driver.nome, r.driver.endereco, r.driver.telefone||'', 'Sai '+fmtTime(r.ida.dep), Math.round((r.ida.arr-r.ida.dep)/60000)]);
-      r.ida.stops.forEach((s,i) => ida.push([p.turno.nome, r.v.nome, r.driver.nome, i+1, s.f.nome, s.f.endereco, s.f.telefone||'', fmtTime(s.at), Math.round(s.onboard/60)]));
-      r.volta.stops.forEach((s,i) => volta.push([p.turno.nome, r.v.nome, r.driver.nome, i+1, s.f.nome, s.f.endereco, s.f.telefone||'', fmtTime(s.at), Math.round(s.onboard/60)]));
-      volta.push([p.turno.nome, r.v.nome, r.driver.nome, 'Motorista', r.driver.nome, r.driver.endereco, r.driver.telefone||'', 'Chega '+fmtTime(r.volta.arr), Math.round((r.volta.arr-r.volta.dep)/60000)]);
+      resumo.push([p.turno.nome, r.v.nome, r.v.placa||'', r.driver.nome, r.driver.telefone||'', r.ida.stops.length+1, +r.v.capacidade, fmtTime(r.ida.dep), fmtTime(r.ida.arr), +(r.ida.meters/1000).toFixed(1), fmtTime(r.volta.dep), fmtTime(r.volta.arr), +(r.volta.meters/1000).toFixed(1), r.manual?'Sim':'']);
+      ida.push([p.turno.nome, r.v.nome, r.driver.nome, 'Motorista', r.driver.nome, r.driver.endereco||'', r.driver.telefone||'', 'Sai '+fmtTime(r.ida.dep), Math.round((r.ida.arr-r.ida.dep)/60000)]);
+      r.ida.stops.forEach((s,i) => ida.push([p.turno.nome, r.v.nome, r.driver.nome, i+1, s.f.nome, s.f.endereco||'', s.f.telefone||'', fmtTime(s.at), Math.round(s.onboard/60)]));
+      r.volta.stops.forEach((s,i) => volta.push([p.turno.nome, r.v.nome, r.driver.nome, i+1, s.f.nome, s.f.endereco||'', s.f.telefone||'', fmtTime(s.at), Math.round(s.onboard/60)]));
+      volta.push([p.turno.nome, r.v.nome, r.driver.nome, 'Motorista', r.driver.nome, r.driver.endereco||'', r.driver.telefone||'', 'Chega '+fmtTime(r.volta.arr), Math.round((r.volta.arr-r.volta.dep)/60000)]);
     });
-    p.unassigned.forEach(f => sem.push([p.turno.nome, f.nome, f.endereco, 'Faltam lugares ou motoristas com CNH']));
+    p.unassigned.forEach(f => sem.push([p.turno.nome, f.nome, f.endereco, 'Fora das rotas salvas']));
     p.skipped.forEach(f => sem.push([p.turno.nome, f.nome, f.endereco, 'Endereço não localizado']));
   });
   const wb = XLSX.utils.book_new();
   [['Resumo',resumo],['Ida',ida],['Volta',volta]].forEach(([n,a]) => XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(a), n));
   if (sem.length > 1) XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sem), 'Sem rota');
-  XLSX.writeFile(wb, `rotas-${plan[0].date}.xlsx`);
+  XLSX.writeFile(wb, `rotas-${ymd(new Date())}.xlsx`);
 });
 
 /* ---------------- Início ---------------- */
